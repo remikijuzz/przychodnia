@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include "registration.h"
 
@@ -31,6 +32,10 @@ Patient process_next_patient() {
     front = (front + 1) % QUEUE_SIZE;
     pthread_mutex_unlock(&queue_mutex);
     return patient;
+}
+
+int is_queue_empty() {
+    return front == rear;  // Kolejka jest pusta, jeśli front == rear
 }
 
 void close_registration() {

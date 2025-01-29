@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include "config.h"
 
+
 // Struktura pacjenta
 typedef struct {
     int id;
@@ -13,9 +14,12 @@ typedef struct {
     int age;
 } Patient;
 
+
+
 // Kolejka pacjentów
 extern pthread_mutex_t queue_mutex;
 extern pthread_cond_t queue_not_empty;
+
 
 // Inicjalizacja rejestracji
 void init_registration();
@@ -25,6 +29,8 @@ void add_patient_to_queue(Patient patient);
 
 // Pobranie pacjenta z kolejki do obsługi
 Patient process_next_patient();
+
+int is_queue_empty(); 
 
 // Zamknięcie rejestracji
 void close_registration();

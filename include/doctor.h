@@ -21,4 +21,8 @@ bool handle_patient(Doctor *doctor, Patient patient);
 // Pobieranie lekarza po ID
 Doctor* get_doctor_by_id(int id);
 
+
+void* doctor_thread(void* arg);
+
+
 #endif // DOCTOR_H
