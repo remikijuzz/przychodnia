@@ -39,22 +39,27 @@ void* doctor_thread(void* arg) {
     free(arg);
 
     while (clinic_open || !is_queue_empty()) {  
-        pthread_mutex_lock(&queue_mutex);
-        while (is_queue_empty() && clinic_open) {  
-            pthread_cond_wait(&queue_not_empty, &queue_mutex);  
-        }
+    pthread_mutex_lock(&queue_mutex);
+    if (is_queue_empty() && !clinic_open) {
         pthread_mutex_unlock(&queue_mutex);
+        break;  // Jeśli klinika zamknięta i kolejka pusta, lekarz kończy pracę
+    }
+    while (is_queue_empty() && clinic_open) {  
+        pthread_cond_wait(&queue_not_empty, &queue_mutex);
+    }
+    pthread_mutex_unlock(&queue_mutex);
 
-        Patient p = process_next_patient();
-        if (p.id != -1) {
-            Doctor* doctor = get_doctor_by_id(doctor_id);
-            if (doctor && doctor->patients_seen < doctor->max_patients) {
-                handle_patient(doctor, p);
-            } else {
-                printf("Pacjent %d nie może zostać przyjęty przez %s(limit osiągnięty).\n", p.id, doctor_names[doctor->id]);
-            }
+    Patient p = process_next_patient();
+    if (p.id != -1) {
+        Doctor* doctor = get_doctor_by_id(doctor_id);
+        if (doctor && doctor->patients_seen < doctor->max_patients) {
+            handle_patient(doctor, p);
+        } else {
+            printf("Pacjent %d nie może zostać przyjęty przez %s (limit osiągnięty).\n", p.id, doctor_names[doctor->id]);
         }
     }
+}
+
 
     printf("%s zakończył pracę.\n", doctor_names[doctor_id]);
     return NULL;

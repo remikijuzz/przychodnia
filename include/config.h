@@ -11,6 +11,6 @@
 #define DOCTOR_POZ_LIMIT 30
 #define DOCTOR_SPECIALIST_LIMIT 10
 
-extern int clinic_open;
+extern _Bool clinic_open;
 
 #endif
