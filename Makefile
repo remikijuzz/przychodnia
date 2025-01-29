@@ -1,21 +1,19 @@
-# Kompilator i flagi
 CC = gcc
-CFLAGS = -Wall -Wextra -Iinclude
-SRC = $(wildcard src/*.c)
-OBJ = $(SRC:src/%.c=build/%.o)
-EXEC = przychodnia
+CFLAGS = -Wall -Wextra -Iinclude -pthread
+OBJDIR = build
 
-# Reguły
-all: $(EXEC)
+SRC = src/main.c src/registration.c src/doctor.c
+OBJ = $(SRC:.c=.o)
 
-build/%.o: src/%.c
-	@mkdir -p build
+TARGET = przychodnia
+
+all: $(TARGET)
+
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(EXEC): $(OBJ)
-	$(CC) $(OBJ) -o $@
-
 clean:
-	rm -rf build $(EXEC)
-
-.PHONY: all clean
+	rm -rf $(OBJDIR) $(TARGET)

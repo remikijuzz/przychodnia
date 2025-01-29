@@ -2,23 +2,31 @@
 #define REGISTRATION_H
 
 #include <stdbool.h>
+#include <pthread.h>
+#include "config.h"
 
-#define MAX_PATIENTS 50 // Maksymalna liczba pacjentów w budynku
-
-extern pthread_cond_t queue_not_empty;
-
-
+// Struktura pacjenta
 typedef struct {
-    int id;               // ID pacjenta
-    bool is_vip;          // Czy pacjent jest VIP?
-    int target_doctor;    // ID docelowego lekarza
-    int age;              // Wiek pacjenta
-    bool has_guardian;    // Czy pacjent ma opiekuna (dla dzieci poniżej 18 lat)?
+    int id;
+    bool is_vip;
+    int target_doctor;
+    int age;
 } Patient;
 
+// Kolejka pacjentów
+extern pthread_mutex_t queue_mutex;
+extern pthread_cond_t queue_not_empty;
+
+// Inicjalizacja rejestracji
 void init_registration();
+
+// Dodanie pacjenta do kolejki
 void add_patient_to_queue(Patient patient);
+
+// Pobranie pacjenta z kolejki do obsługi
 Patient process_next_patient();
+
+// Zamknięcie rejestracji
 void close_registration();
 
-#endif
+#endif // REGISTRATION_H
