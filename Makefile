@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Iinclude -pthread
 OBJDIR = build
 
-SRC = src/main.c src/registration.c src/doctor.c
+SRC = src/main.c src/registration.c src/doctor.c src/patient.o
 OBJ = $(SRC:.c=.o)
 
 TARGET = przychodnia
