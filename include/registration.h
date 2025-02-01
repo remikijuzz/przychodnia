@@ -4,16 +4,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include "config.h"
-
-
-// Struktura pacjenta
-typedef struct {
-    int id;
-    bool is_vip;
-    int target_doctor;
-    int age;
-} Patient;
-
+#include "patient.h"
 
 
 // Kolejka pacjentów

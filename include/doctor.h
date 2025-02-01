@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include "config.h"
 #include "registration.h"
+#include "patient.h"
 
 // Struktura reprezentująca lekarza
 typedef struct {
