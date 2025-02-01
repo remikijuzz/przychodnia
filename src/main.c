@@ -8,48 +8,33 @@
 #include "config.h"
 
 #define PATH "./src/"
+#define SIMULATION_TIME 20  // ✅ Czas działania symulacji przed zamknięciem (w sekundach)
 
 pid_t director_pid, registration_pid, patient_pid;
 pid_t doctor_pids[NUM_DOCTORS];
 
-void send_signal_to_doctor(int doctor_id) {
-    if (doctor_id < 0 || doctor_id >= NUM_DOCTORS) {
-        printf("Błędne ID lekarza.\n");
-        return;
-    }
-    kill(doctor_pids[doctor_id], SIGUSR1);
-    printf("Dyrektor: Wysłano SIGUSR1 do lekarza ID %d (PID %d)\n", doctor_id, doctor_pids[doctor_id]);
-}
-
 void send_signal_to_all() {
+    printf("\n📢 Dyrektor: Przychodnia działa normalnie...\n");
+    sleep(SIMULATION_TIME);  // ✅ Pozwalamy przychodni działać przez 20 sekund
+
+    printf("\n📢 Dyrektor: Przygotowuję zamknięcie przychodni...\n");
+    sleep(2);
+    printf("🔔 Dyrektor: Informuję pacjentów o zamknięciu!\n");
+    sleep(2);
+    printf("📌 Dyrektor: Informuję lekarzy o zakończeniu pracy!\n");
+
     kill(registration_pid, SIGUSR2);
     kill(patient_pid, SIGUSR2);
     for (int i = 0; i < NUM_DOCTORS; i++) {
         kill(doctor_pids[i], SIGUSR2);
     }
-    printf("Dyrektor: Wysłano SIGUSR2 do wszystkich procesów.\n");
+
+    printf("✅ Dyrektor: Przychodnia została zamknięta.\n");
+    sleep(3);
 }
 
 int main(int argc, char *argv[]) {
-    if (argc == 2 && argv[1][0] == '-' && argv[1][1] == 'd') {
-        if (argv[1][2] == '\0') {
-            // Opcja -d (zamknięcie całej przychodni)
-            send_signal_to_all();
-            exit(0);
-        } else {
-            // Opcja -dx (zamknięcie konkretnego lekarza)
-            int doctor_id = argv[1][2] - '0';  // Pobiera numer lekarza
-            if (doctor_id >= 0 && doctor_id < NUM_DOCTORS) {
-                send_signal_to_doctor(doctor_id);
-                exit(0);
-            } else {
-                printf("Błędne ID lekarza! Musi być od 0 do %d.\n", NUM_DOCTORS - 1);
-                exit(1);
-            }
-        }
-    }
-
-    printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
+    printf("🏥 Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
 
     // Tworzenie procesu rejestracji
     registration_pid = fork();
@@ -87,6 +72,12 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    // Jeśli uruchomiono program z -d, czekamy 20 sekund, a potem zamykamy przychodnię
+    if (argc == 2 && strcmp(argv[1], "-d") == 0) {
+        send_signal_to_all();
+        exit(0);
+    }
+
     // Oczekiwanie na zakończenie pracy wszystkich procesów
     waitpid(registration_pid, NULL, 0);
     waitpid(patient_pid, NULL, 0);
@@ -95,6 +86,6 @@ int main(int argc, char *argv[]) {
         waitpid(doctor_pids[i], NULL, 0);
     }
 
-    printf("Przychodnia zamknięta.\n");
+    printf("🏥 Przychodnia zamknięta.\n");
     return 0;
 }
