@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <time.h>
 #include "patient.h"
 #include "registration.h"
 
@@ -12,16 +13,20 @@
 
 volatile bool running = true;
 int patients_seen = 0;
+static int doctor_id;
 
-void handle_sigusr1(int sig) {
-    (void)sig;  // ✅ Oznaczenie parametru jako nieużywanego
-    printf("Lekarz: Otrzymano SIGUSR1, kończę przyjmowanie pacjentów.\n");
-    running = false;
-}
+const char *doctor_specializations[] = {
+    "Lekarz POZ 1",
+    "Lekarz POZ 2",
+    "Lekarz Kardiolog",
+    "Lekarz Okulista",
+    "Lekarz Pediatra",
+    "Lekarz Medycyny Pracy"
+};
 
 void handle_sigusr2(int sig) {
-    (void)sig;  // ✅ Oznaczenie parametru jako nieużywanego
-    printf("Lekarz: Otrzymano SIGUSR2, natychmiastowe zamknięcie!\n");
+    (void)sig;
+    printf("Lekarz %s: Otrzymano SIGUSR2 – opuszczam gabinet i kończę pracę.\n", doctor_specializations[doctor_id]);
     exit(0);
 }
 
@@ -31,11 +36,12 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    int doctor_id = atoi(argv[1]);
-    signal(SIGUSR1, handle_sigusr1);
+    srand(time(NULL));
+
+    doctor_id = atoi(argv[1]);
     signal(SIGUSR2, handle_sigusr2);
 
-    printf("Lekarz ID %d uruchomiony, PID: %d\n", doctor_id, getpid());
+    printf("%s uruchomiony, PID: %d\n", doctor_specializations[doctor_id], getpid());
 
     int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
     if (msg_queue_id == -1) {
@@ -49,18 +55,18 @@ int main(int argc, char *argv[]) {
         if (patients_seen < MAX_PATIENTS) {
             PatientMessage msg;
             if (msgrcv(msg_queue_id, &msg, sizeof(Patient), 1, IPC_NOWAIT) != -1) {
-                printf("Lekarz %d: Przyjmuję pacjenta ID %d (%d/%d), VIP: %d\n",
-                       doctor_id, msg.patient.id, patients_seen + 1, MAX_PATIENTS, msg.patient.is_vip);
+                printf("%s: Przyjmuję pacjenta ID %d (%d/%d), VIP: %d\n",
+                       doctor_specializations[doctor_id], msg.patient.id, patients_seen + 1, MAX_PATIENTS, msg.patient.is_vip);
                 patients_seen++;
             } else {
-                printf("Lekarz %d: Brak pacjentów w kolejce.\n", doctor_id);
+                printf("%s: Brak pacjentów w kolejce.\n", doctor_specializations[doctor_id]);
             }
         } else {
-            printf("Lekarz %d: Osiągnięto limit pacjentów.\n", doctor_id);
+            printf("%s: Osiągnięto limit pacjentów.\n", doctor_specializations[doctor_id]);
             running = false;
         }
     }
 
-    printf("Lekarz %d zakończył pracę.\n", doctor_id);
+    printf("%s zakończył pracę i opuszcza przychodnię.\n", doctor_specializations[doctor_id]);
     return 0;
 }

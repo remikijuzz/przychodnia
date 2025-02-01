@@ -9,7 +9,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include "patient.h"
-#include "config.h"  
+#include "config.h"
 
 #define MSG_QUEUE_KEY 1234
 #define MAX_PATIENTS_IN_BUILDING 50  // Limit pacjentów w budynku
@@ -17,10 +17,11 @@
 volatile bool running = true;
 
 void handle_sigusr2(int sig) {
-    (void)sig;  // Oznaczenie parametru jako nieużywanego, aby uniknąć ostrzeżenia
-    printf("Pacjent: Otrzymano SIGUSR2, wszyscy pacjenci opuszczają przychodnię!\n");
-    running = false;
+    (void)sig;
+    printf("Pacjenci: Otrzymano SIGUSR2 – wszyscy pacjenci natychmiast opuszczają przychodnię.\n");
+    exit(0);
 }
+
 
 int main() {
     signal(SIGUSR2, handle_sigusr2);
@@ -61,6 +62,6 @@ int main() {
         sleep(1);  // Co sekundę generujemy nowego pacjenta
     }
 
-    printf("Generator pacjentów zakończył działanie.\n");
+    printf("🏃‍♂️ Generator pacjentów zakończył działanie.\n");
     return 0;
 }

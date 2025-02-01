@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include "registration.h"
 #include "doctor.h"
-#include "patient.h"  // ✅ Dodano zamiast ponownej definicji PatientMessage
+#include "patient.h"  
 
 #define MAX_QUEUE_SIZE 100
 #define SECOND_WINDOW_THRESHOLD 25

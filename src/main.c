@@ -8,33 +8,39 @@
 #include "config.h"
 
 #define PATH "./src/"
-#define SIMULATION_TIME 20  // ✅ Czas działania symulacji przed zamknięciem (w sekundach)
+#define SIMULATION_TIME 10  // Czas działania symulacji przed zamknięciem (w sekundach)
 
 pid_t director_pid, registration_pid, patient_pid;
 pid_t doctor_pids[NUM_DOCTORS];
 
 void send_signal_to_all() {
-    printf("\n📢 Dyrektor: Przychodnia działa normalnie...\n");
-    sleep(SIMULATION_TIME);  // ✅ Pozwalamy przychodni działać przez 20 sekund
+    printf("\nDyrektor: Przychodnia rozpoczęła normalną pracę.\n");
+    
+    sleep(10);  // Przychodnia działa normalnie przez 10 sekund
 
-    printf("\n📢 Dyrektor: Przygotowuję zamknięcie przychodni...\n");
-    sleep(2);
-    printf("🔔 Dyrektor: Informuję pacjentów o zamknięciu!\n");
-    sleep(2);
-    printf("📌 Dyrektor: Informuję lekarzy o zakończeniu pracy!\n");
+    printf("\nDyrektor: Informuję pacjentów i lekarzy, że przychodnia jest zamykana – proszę opuścić budynek.\n");
 
-    kill(registration_pid, SIGUSR2);
+    // Natychmiast zatrzymujemy generowanie nowych pacjentów
     kill(patient_pid, SIGUSR2);
+    sleep(1);
+
+    // Zatrzymujemy rejestrację
+    kill(registration_pid, SIGUSR2);
+    sleep(1);
+
+    // Lekarze natychmiast kończą pracę i opuszczają przychodnię
     for (int i = 0; i < NUM_DOCTORS; i++) {
         kill(doctor_pids[i], SIGUSR2);
     }
+    sleep(2);
 
-    printf("✅ Dyrektor: Przychodnia została zamknięta.\n");
-    sleep(3);
+    printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
 }
 
+
+
 int main(int argc, char *argv[]) {
-    printf("🏥 Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
+    printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
 
     // Tworzenie procesu rejestracji
     registration_pid = fork();
@@ -72,7 +78,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Jeśli uruchomiono program z -d, czekamy 20 sekund, a potem zamykamy przychodnię
+    // Jeśli uruchomiono program z -d, czekamy 10 sekund, a potem zamykamy przychodnię
     if (argc == 2 && strcmp(argv[1], "-d") == 0) {
         send_signal_to_all();
         exit(0);
@@ -86,6 +92,6 @@ int main(int argc, char *argv[]) {
         waitpid(doctor_pids[i], NULL, 0);
     }
 
-    printf("🏥 Przychodnia zamknięta.\n");
+    printf("Przychodnia zamknięta.\n");
     return 0;
 }
