@@ -1,43 +1,61 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include "registration.h"
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include "config.h"
 
-static Patient queue[QUEUE_SIZE];
-static int front = 0, rear = 0;
-pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t queue_not_empty = PTHREAD_COND_INITIALIZER;
+int main() {
+    printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
 
-void init_registration() {
-    printf("Rejestracja rozpoczęta.\n");
-}
+    pid_t director_pid, registration_pid, patient_pid;
+    pid_t doctor_pids[NUM_DOCTORS];
 
-void add_patient_to_queue(Patient patient) {
-    pthread_mutex_lock(&queue_mutex);
-    queue[rear] = patient;
-    rear = (rear + 1) % QUEUE_SIZE;
-    printf("Pacjent %d dodany do kolejki.\n", patient.id);
-    pthread_cond_signal(&queue_not_empty);
-    pthread_mutex_unlock(&queue_mutex);
-}
-
-Patient process_next_patient() {
-    pthread_mutex_lock(&queue_mutex);
-    if (front == rear) {
-        pthread_mutex_unlock(&queue_mutex);
-        return (Patient){ -1, false, -1, 0 };
+    // Tworzenie procesu rejestracji
+    registration_pid = fork();
+    if (registration_pid == 0) {
+        execl("./src/registration", "registration", NULL);  // Dodano poprawną ścieżkę
+        perror("Błąd uruchamiania procesu rejestracji");
+        exit(EXIT_FAILURE);
     }
 
-    Patient patient = queue[front];
-    front = (front + 1) % QUEUE_SIZE;
-    pthread_mutex_unlock(&queue_mutex);
-    return patient;
-}
+    // Tworzenie procesów lekarzy
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        doctor_pids[i] = fork();
+        if (doctor_pids[i] == 0) {
+            char doctor_id_str[10];
+            sprintf(doctor_id_str, "%d", i);
+            execl("./src/doctor", "doctor", doctor_id_str, NULL);  // Dodano poprawną ścieżkę
+            perror("Błąd uruchamiania procesu lekarza");
+            exit(EXIT_FAILURE);
+        }
+    }
 
-int is_queue_empty() {
-    return front == rear;  // Kolejka jest pusta, jeśli front == rear
-}
+    // Tworzenie procesu generatora pacjentów
+    patient_pid = fork();
+    if (patient_pid == 0) {
+        execl("./src/patient", "patient", NULL);  // Dodano poprawną ścieżkę
+        perror("Błąd uruchamiania generatora pacjentów");
+        exit(EXIT_FAILURE);
+    }
 
-void close_registration() {
-    printf("Rejestracja zamknięta.\n");
+    // Tworzenie procesu dyrektora
+    director_pid = fork();
+    if (director_pid == 0) {
+        execl("./src/director", "director", NULL);  // Dodano poprawną ścieżkę
+        perror("Błąd uruchamiania procesu dyrektora");
+        exit(EXIT_FAILURE);
+    }
+
+    // Oczekiwanie na zakończenie pracy wszystkich procesów
+    waitpid(registration_pid, NULL, 0);
+    waitpid(patient_pid, NULL, 0);
+    waitpid(director_pid, NULL, 0);
+
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        waitpid(doctor_pids[i], NULL, 0);
+    }
+
+    printf("Przychodnia zamknięta.\n");
+    return 0;
 }

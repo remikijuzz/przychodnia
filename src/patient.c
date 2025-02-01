@@ -1,41 +1,45 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include "patient.h"
-#include "registration.h"  // Do funkcji add_patient_to_queue()
 #include "config.h"
 
-extern bool clinic_closing; // Zadeklarowana w main.c
-extern pthread_mutex_t clinic_mutex; // Zadeklarowana w main.c
+#define MSG_QUEUE_KEY 1234
 
-void* patient_generator(void* arg) {
-    (void)arg;
-    for (int hour = CLINIC_OPEN_HOUR; hour <= CLINIC_CLOSE_HOUR; hour++) {
-        pthread_mutex_lock(&clinic_mutex);
-        if (clinic_closing) {  // Jeśli rejestracja jest zamknięta, przerywamy generowanie pacjentów
-            pthread_mutex_unlock(&clinic_mutex);
-            printf("Rejestracja zamknięta - nowi pacjenci nie są przyjmowani.\n");
-            break;
-        }
-        pthread_mutex_unlock(&clinic_mutex);
+typedef struct {
+    long msg_type;
+    Patient patient;
+} PatientMessage;
 
-        printf("Godzina %d:00 - Pacjenci przychodzą.\n", hour);
-        
-        for (int i = 0; i < 10; i++) { // 10 pacjentów na godzinę
-            pthread_mutex_lock(&clinic_mutex);
-            if (clinic_closing) {  // Sprawdzamy ponownie wewnątrz pętli
-                pthread_mutex_unlock(&clinic_mutex);
-                printf("Rejestracja zamknięta - reszta pacjentów nie jest przyjmowana.\n");
-                break;
-            }
-            pthread_mutex_unlock(&clinic_mutex);
+int main() {
+    printf("Generator pacjentów uruchomiony\n");
 
-            Patient p = { rand() % 70 + 1, rand() % 2, rand() % NUM_DOCTORS, rand() % 90 };
-            add_patient_to_queue(p);
-        }
-
-        sleep(1);  // Symulacja godziny
+    // Pobranie kolejki komunikatów
+    int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
+    if (msg_queue_id == -1) {
+        perror("Błąd otwierania kolejki komunikatów");
+        exit(EXIT_FAILURE);
     }
-    return NULL;
+
+    for (int i = 0; i < 5; i++) { // Generujemy 5 pacjentów na test
+        Patient p = {rand() % 70 + 1, rand() % 2, rand() % NUM_DOCTORS, rand() % 90};
+
+        PatientMessage msg;
+        msg.msg_type = 1;  // Typ wiadomości (musi być > 0)
+        msg.patient = p;
+
+        // Wysłanie pacjenta do rejestracji
+        if (msgsnd(msg_queue_id, &msg, sizeof(Patient), 0) == -1) {
+            perror("Błąd wysyłania pacjenta");
+            continue;
+        }
+
+        printf("Pacjent ID %d wysłany do rejestracji\n", p.id);
+        sleep(1);
+    }
+
+    return 0;
 }

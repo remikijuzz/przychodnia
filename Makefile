@@ -1,19 +1,26 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Iinclude -pthread
-OBJDIR = build
 
-SRC = src/main.c src/registration.c src/doctor.c src/patient.o src/director.c
-OBJ = $(SRC:.c=.o)
+SRC_DIR = src
 
-TARGET = przychodnia
+EXECUTABLES = $(SRC_DIR)/przychodnia $(SRC_DIR)/registration $(SRC_DIR)/doctor $(SRC_DIR)/patient $(SRC_DIR)/director
 
-all: $(TARGET)
+all: $(EXECUTABLES)
 
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+$(SRC_DIR)/przychodnia: $(SRC_DIR)/main.c
+	$(CC) $(CFLAGS) -o $@ $<
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+$(SRC_DIR)/registration: $(SRC_DIR)/registration.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(SRC_DIR)/doctor: $(SRC_DIR)/doctor.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(SRC_DIR)/patient: $(SRC_DIR)/patient.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(SRC_DIR)/director: $(SRC_DIR)/director.c
+	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET)
+	rm -f $(EXECUTABLES)

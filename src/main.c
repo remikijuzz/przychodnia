@@ -1,65 +1,63 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <unistd.h>
-#include <semaphore.h>
+#include <sys/wait.h>
+#include <sys/types.h>
 #include "config.h"
-#include "registration.h"
-#include "doctor.h"
-#include <signal.h>
-#include <stdbool.h>
 
-// Semafor do kontroli liczby pacjentów w budynku
-sem_t building_capacity;
-
-bool clinic_open = true;   // Czy przychodnia przyjmuje pacjentów?
-bool clinic_closing = false; // Czy zamykamy przychodnię?
-
-pthread_mutex_t clinic_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void* doctor_thread(void* arg);
+#define PATH "./src/"
 
 int main() {
-
     printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
-    
-    pthread_t doctor_threads[NUM_DOCTORS];
 
-    // Inicjalizacja lekarzy PRZED rejestracją pacjentów
-    for (int i = 0; i < NUM_DOCTORS; i++) {
-        int* doctor_id = malloc(sizeof(int));
-        *doctor_id = i;
-        pthread_create(&doctor_threads[i], NULL, doctor_thread, doctor_id);
+    pid_t director_pid, registration_pid, patient_pid;
+    pid_t doctor_pids[NUM_DOCTORS];
+
+    // Tworzenie procesu rejestracji
+    registration_pid = fork();
+    if (registration_pid == 0) {
+        execl(PATH "registration", "registration", NULL);
+        perror("Błąd uruchamiania procesu rejestracji");
+        exit(EXIT_FAILURE);
     }
 
-    init_registration();
-    init_doctors();
-
-    sem_init(&building_capacity, 0, MAX_PATIENTS_IN_BUILDING);
-
-    pthread_t patient_thread;
-    pthread_create(&patient_thread, NULL, patient_generator, NULL);
-
-    pthread_join(patient_thread, NULL);
-
-    // Zamknięcie rejestracji
-    close_registration();
-    printf("[INFO]: Rejestracja zamknięta.\n");
-
-    pthread_mutex_lock(&clinic_mutex);
-    clinic_open = false;
-    pthread_mutex_unlock(&clinic_mutex);
-
-
-    // Obudzenie lekarzy, żeby sprawdzili kolejkę
-    pthread_cond_broadcast(&queue_not_empty);
-
-    // Czekamy na lekarzy
+    // Tworzenie procesów lekarzy
     for (int i = 0; i < NUM_DOCTORS; i++) {
-        pthread_join(doctor_threads[i], NULL);
+        doctor_pids[i] = fork();
+        if (doctor_pids[i] == 0) {
+            char doctor_id_str[10];
+            sprintf(doctor_id_str, "%d", i);
+            execl(PATH "doctor", "doctor", doctor_id_str, NULL);
+            perror("Błąd uruchamiania procesu lekarza");
+            exit(EXIT_FAILURE);
+        }
     }
-    
 
-    printf("Przychodnia zamknięta, wszyscy pacjenci i lekarze opuścili budynek.\n");
+    // Tworzenie procesu generatora pacjentów
+    patient_pid = fork();
+    if (patient_pid == 0) {
+        execl(PATH "patient", "patient", NULL);
+        perror("Błąd uruchamiania generatora pacjentów");
+        exit(EXIT_FAILURE);
+    }
+
+    // Tworzenie procesu dyrektora
+    director_pid = fork();
+    if (director_pid == 0) {
+        execl(PATH "director", "director", NULL);
+        perror("Błąd uruchamiania procesu dyrektora");
+        exit(EXIT_FAILURE);
+    }
+
+    // Oczekiwanie na zakończenie pracy wszystkich procesów
+    waitpid(registration_pid, NULL, 0);
+    waitpid(patient_pid, NULL, 0);
+    waitpid(director_pid, NULL, 0);
+
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        waitpid(doctor_pids[i], NULL, 0);
+    }
+
+    printf("Przychodnia zamknięta.\n");
     return 0;
 }

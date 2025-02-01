@@ -1,9 +1,9 @@
 #ifndef PATIENT_H
 #define PATIENT_H
 
-#include "config.h" 
+#include <stdbool.h>
 
-// Struktura pacjenta (przeniesiona z registration.h)
+// Struktura pacjenta
 typedef struct {
     int id;
     bool is_vip;
@@ -11,7 +11,7 @@ typedef struct {
     int age;
 } Patient;
 
-// Funkcja generująca pacjentów (przeniesiona z main.c)
-void* patient_generator(void* arg); 
+// Funkcja generująca pacjentów
+void* patient_generator();
 
 #endif // PATIENT_H
