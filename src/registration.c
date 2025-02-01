@@ -1,61 +1,91 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <sys/types.h>
-#include "config.h"
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdbool.h>
+#include "registration.h"
+#include "doctor.h"
+#include "patient.h"  // ✅ Dodano zamiast ponownej definicji PatientMessage
+
+#define MAX_QUEUE_SIZE 100
+#define SECOND_WINDOW_THRESHOLD 25
+#define CLOSE_SECOND_WINDOW_THRESHOLD 15
+
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t queue_not_empty = PTHREAD_COND_INITIALIZER;
+
+int msg_queue_id;
+int patient_count = 0;
+volatile bool running = true;
+
+void handle_sigusr2(int sig) {
+    (void)sig;
+    printf("Rejestracja: Otrzymano SIGUSR2, kończę pracę.\n");
+    running = false;
+}
+
+void* registration_window(void* arg) {
+    int window_id = *(int*)arg;
+    free(arg);
+
+    while (running) {
+        pthread_mutex_lock(&queue_mutex);
+        while (patient_count == 0 && running) {
+            pthread_cond_wait(&queue_not_empty, &queue_mutex);
+        }
+
+        if (!running) {
+            pthread_mutex_unlock(&queue_mutex);
+            break;
+        }
+
+        PatientMessage msg;
+        msgrcv(msg_queue_id, &msg, sizeof(Patient), 1, 0);
+        patient_count--;
+        pthread_mutex_unlock(&queue_mutex);
+
+        printf("Rejestracja okienko %d: Pacjent ID %d zapisany do lekarza %d.\n",
+               window_id, msg.patient.id, msg.patient.target_doctor);
+        sleep(2);
+    }
+
+    printf("Rejestracja okienko %d zamyka się.\n", window_id);
+    return NULL;
+}
 
 int main() {
-    printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
+    signal(SIGUSR2, handle_sigusr2);
 
-    pid_t director_pid, registration_pid, patient_pid;
-    pid_t doctor_pids[NUM_DOCTORS];
-
-    // Tworzenie procesu rejestracji
-    registration_pid = fork();
-    if (registration_pid == 0) {
-        execl("./src/registration", "registration", NULL);  // Dodano poprawną ścieżkę
-        perror("Błąd uruchamiania procesu rejestracji");
+    msg_queue_id = msgget(MSG_QUEUE_KEY, IPC_CREAT | 0666);
+    if (msg_queue_id == -1) {
+        perror("Błąd tworzenia kolejki komunikatów");
         exit(EXIT_FAILURE);
     }
 
-    // Tworzenie procesów lekarzy
-    for (int i = 0; i < NUM_DOCTORS; i++) {
-        doctor_pids[i] = fork();
-        if (doctor_pids[i] == 0) {
-            char doctor_id_str[10];
-            sprintf(doctor_id_str, "%d", i);
-            execl("./src/doctor", "doctor", doctor_id_str, NULL);  // Dodano poprawną ścieżkę
-            perror("Błąd uruchamiania procesu lekarza");
-            exit(EXIT_FAILURE);
+    pthread_t reg_window1, reg_window2;
+    int* id1 = malloc(sizeof(int));
+    *id1 = 1;
+    pthread_create(&reg_window1, NULL, registration_window, id1);
+
+    while (running) {
+        sleep(5);
+        pthread_mutex_lock(&queue_mutex);
+        if (patient_count > SECOND_WINDOW_THRESHOLD) {
+            printf("Otwieram drugie okienko rejestracji!\n");
+            int* id2 = malloc(sizeof(int));
+            *id2 = 2;
+            pthread_create(&reg_window2, NULL, registration_window, id2);
+        } else if (patient_count < CLOSE_SECOND_WINDOW_THRESHOLD) {
+            printf("Zamykam drugie okienko rejestracji.\n");
+            pthread_cancel(reg_window2);
         }
+        pthread_mutex_unlock(&queue_mutex);
     }
 
-    // Tworzenie procesu generatora pacjentów
-    patient_pid = fork();
-    if (patient_pid == 0) {
-        execl("./src/patient", "patient", NULL);  // Dodano poprawną ścieżkę
-        perror("Błąd uruchamiania generatora pacjentów");
-        exit(EXIT_FAILURE);
-    }
-
-    // Tworzenie procesu dyrektora
-    director_pid = fork();
-    if (director_pid == 0) {
-        execl("./src/director", "director", NULL);  // Dodano poprawną ścieżkę
-        perror("Błąd uruchamiania procesu dyrektora");
-        exit(EXIT_FAILURE);
-    }
-
-    // Oczekiwanie na zakończenie pracy wszystkich procesów
-    waitpid(registration_pid, NULL, 0);
-    waitpid(patient_pid, NULL, 0);
-    waitpid(director_pid, NULL, 0);
-
-    for (int i = 0; i < NUM_DOCTORS; i++) {
-        waitpid(doctor_pids[i], NULL, 0);
-    }
-
-    printf("Przychodnia zamknięta.\n");
+    printf("Rejestracja zakończyła pracę.\n");
     return 0;
 }

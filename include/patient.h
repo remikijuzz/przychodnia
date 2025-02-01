@@ -11,7 +11,10 @@ typedef struct {
     int age;
 } Patient;
 
-// Funkcja generująca pacjentów
-void* patient_generator();
+// Struktura wiadomości dla kolejki komunikatów
+typedef struct {
+    long msg_type;
+    Patient patient;
+} PatientMessage;
 
 #endif // PATIENT_H
