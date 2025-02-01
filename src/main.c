@@ -19,22 +19,7 @@ pthread_mutex_t clinic_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void* doctor_thread(void* arg);
 
-void handle_director_signal(int sig) {
-    pthread_mutex_lock(&clinic_mutex);
-    if (sig == SIGUSR1) {
-        printf("\n[Dyrektor]: Rejestracja zamknięta, nie przyjmujemy nowych pacjentów.\n");
-        clinic_closing = true;  // Nowi pacjenci nie są już rejestrowani
-    } else if (sig == SIGUSR2) {
-        printf("\n[Dyrektor]: Natychmiastowe zamknięcie przychodni! Pacjenci i lekarze wychodzą.\n");
-        clinic_open = false;  // Zmuszamy wszystkich do opuszczenia przychodni
-    }
-    pthread_mutex_unlock(&clinic_mutex);
-}
-
-
 int main() {
-    signal(SIGUSR1, handle_director_signal);
-    signal(SIGUSR2, handle_director_signal);
 
     printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
     
