@@ -6,71 +6,93 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "config.h"
-#include "patient.h"
-#include "doctor.h"
-#include "registration.h"
+
+pid_t registration_pid;
+pid_t patient_pid;
+pid_t doctor_pids[NUM_DOCTORS];
 
 volatile bool running = true;
-pid_t doctor_pids[NUM_DOCTORS];  // Tablica PID-ów lekarzy
-pid_t registration_pid;           // PID procesu rejestracji
-pid_t patient_pid;     
 
-void handle_sigint(int sig) {
+void handle_sigusr1(int sig) {
     (void)sig;
-    printf("Dyrektor: Otrzymano SIGINT – zamykam przychodnię.\n");
-    running = false;
-}
+    printf("\nDyrektor: Jest godzina %02d:00 – zamykamy przychodnię.\n", CLINIC_CLOSE_HOUR);
+    printf("Dyrektor: Pacjenci i lekarze, proszę opuścić budynek.\n");
 
-void send_signal_to_doctor(int doctor_id) {
-    if (doctor_id < 0 || doctor_id >= NUM_DOCTORS) {
-        printf("Dyrektor: Niepoprawne ID lekarza.\n");
-        return;
+    if (patient_pid > 0) {
+        kill(patient_pid, SIGUSR1);
     }
-    printf("Dyrektor: Wysyłam SIGUSR1 do %d (PID %d)...\n", doctor_id, doctor_pids[doctor_id]);
-    kill(doctor_pids[doctor_id], SIGUSR1);
-}
-
-void close_clinic() {
-    printf("\nDyrektor: Informuję pacjentów i lekarzy, że przychodnia jest zamykana – proszę opuścić budynek.\n");
-
-    // Zamknięcie generatora pacjentów
-    kill(patient_pid, SIGUSR2);
     sleep(1);
 
-    // Zamknięcie rejestracji
-    kill(registration_pid, SIGUSR2);
+    if (registration_pid > 0) {
+        kill(registration_pid, SIGUSR1);
+    }
     sleep(1);
 
-    // Zamknięcie lekarzy
     for (int i = 0; i < NUM_DOCTORS; i++) {
-        kill(doctor_pids[i], SIGUSR2);
+        if (doctor_pids[i] > 0) {
+            kill(doctor_pids[i], SIGUSR1);
+        }
     }
     sleep(2);
 
     printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
-    exit(0);
+    running = false;
+}
+
+void handle_sigusr2(int sig) {
+    (void)sig;
+    printf("\nDyrektor: Zarządzam ewakuację placówki, proszę opuścić budynek.\n");
+
+    if (patient_pid > 0) {
+        kill(patient_pid, SIGUSR2);
+    }
+    sleep(1);
+
+    if (registration_pid > 0) {
+        kill(registration_pid, SIGUSR2);
+    }
+    sleep(1);
+
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        if (doctor_pids[i] > 0) {
+            kill(doctor_pids[i], SIGUSR2);
+        }
+    }
+    sleep(2);
+
+    printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
+    running = false;
+}
+
+void handle_sigint(int sig) {
+    (void)sig;
+    printf("Dyrektor: Otrzymano SIGINT – kończę działanie.\n");
+    running = false;
 }
 
 int main(int argc, char *argv[]) {
-    signal(SIGINT, handle_sigint);
-
-    if (argc > 1) {
-        if (argv[1][0] == '-' && argv[1][1] == 'd') {
-            if (argv[1][2] >= '0' && argv[1][2] <= '9') {
-                int doctor_id = argv[1][2] - '0';
-                send_signal_to_doctor(doctor_id);
-                return 0;
-            } else {
-                close_clinic();
-            }
-        }
+    if (argc < NUM_DOCTORS + 3) {
+        fprintf(stderr, "Błąd: Niewystarczająca liczba argumentów dla dyrektora\n");
+        exit(EXIT_FAILURE);
     }
 
-    printf("Dyrektor: Przychodnia działa normalnie.\n");
+    registration_pid = atoi(argv[1]);
+    patient_pid = atoi(argv[2]);
+
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        doctor_pids[i] = atoi(argv[i + 3]);
+    }
+
+    signal(SIGUSR1, handle_sigusr1);
+    signal(SIGUSR2, handle_sigusr2);
+    signal(SIGINT, handle_sigint);
+
+    printf("Dyrektor: Rozpoczynam pracę.\n");
 
     while (running) {
         sleep(1);
     }
 
+    printf("Dyrektor: Kończę pracę.\n");
     return 0;
 }

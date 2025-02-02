@@ -22,9 +22,17 @@ void handle_sigusr2(int sig) {
     exit(0);
 }
 
+void handle_sigusr1(int sig) {
+    (void)sig;
+    printf("Pacjenci: Nieczynne.\n");
+    running = false;
+}
+
 int main() {
+    signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
-    
+   
+
     printf("Pacjenci przychodzą do placówki, PID: %d\n", getpid());
 
     int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);

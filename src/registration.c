@@ -27,14 +27,22 @@ void save_to_report(int patient_id, const char *reason) {
     fclose(file);
 }
 
-void handle_sigusr2(int sig) {
+void handle_sigusr1(int sig) {
     (void)sig;
-    printf("Rejestracja: Dyrektor zarządził ewakuację, opuszczamy budynek.\n");
+    printf("Rejestracja: Przychodnia zostala zamknieta.\n");
     running = false;
 }
 
+void handle_sigusr2(int sig) {
+    (void)sig;
+    printf("Rejestracja: Dyrektor zarządził ewakuację, opuszczamy budynek.\n");
+    exit(0);
+}
+
+
 int main() {
-    signal(SIGUSR2, handle_sigusr2);
+    signal(SIGUSR1, handle_sigusr1);
+    signal(SIGUSR2, handle_sigusr2);    
     printf("Rejestracja uruchomiona.\n");
 
     int msg_queue_id = msgget(MSG_QUEUE_KEY, IPC_CREAT | 0666);

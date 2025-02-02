@@ -24,6 +24,7 @@ const char *doctor_specializations[] = {
     "Lekarz Medycyny Pracy"
 };
 
+
 void save_to_report(int patient_id, const char *doctor_name) {
     FILE *file = fopen("report.txt", "a");
     if (file == NULL) {
@@ -37,8 +38,7 @@ void save_to_report(int patient_id, const char *doctor_name) {
 void handle_sigusr1(int sig) {
     (void)sig;
     printf("%s: Kończę przyjmowanie pacjentów i zapisuję raport.\n", doctor_specializations[doctor_id]);
-    save_to_report(-1, doctor_specializations[doctor_id]);  
-    exit(0);
+    running = false;
 }
 
 void handle_sigusr2(int sig) {

@@ -8,33 +8,28 @@
 #include "config.h"
 
 #define PATH "./src/"
-#define SIMULATION_TIME 10  // Czas działania symulacji przed zamknięciem (w sekundach)
+#define EVACUATION_TIME 10  // Czas działania przed ewakuacją
+#define SIMULATION_TIME 5   // Czas między zmianami godzin w symulacji
 
 pid_t director_pid, registration_pid, patient_pid;
 pid_t doctor_pids[NUM_DOCTORS];
+int current_hour = CLINIC_OPEN_HOUR;
 
-void send_signal_to_all() {
-    printf("\nDyrektor: Przychodnia rozpoczęła normalną pracę.\n");
-    
-    sleep(SIMULATION_TIME);  // Przychodnia działa normalnie przez określony czas
+void update_time() {
+    current_hour++;
+    printf("\nGodzina %02d:00\n", current_hour);
+}
 
-    printf("\nDyrektor: Zarządzam ewakuację placówki, proszę opuścić budynek.\n");
+void wait_for_processes() {
+    int status;
 
-    // Natychmiast zatrzymujemy generowanie nowych pacjentów
-    kill(patient_pid, SIGUSR2);
-    sleep(1);
+    if (registration_pid > 0) waitpid(registration_pid, &status, 0);
+    if (patient_pid > 0) waitpid(patient_pid, &status, 0);
+    if (director_pid > 0) waitpid(director_pid, &status, 0);
 
-    // Zatrzymujemy rejestrację
-    kill(registration_pid, SIGUSR2);
-    sleep(1);
-
-    // Lekarze natychmiast kończą pracę i opuszczają przychodnię
     for (int i = 0; i < NUM_DOCTORS; i++) {
-        kill(doctor_pids[i], SIGUSR2);
+        if (doctor_pids[i] > 0) waitpid(doctor_pids[i], &status, 0);
     }
-    sleep(2);
-    printf("Dyrektor opuścił budynek.\n");
-    printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -68,27 +63,50 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Tworzenie procesu dyrektora
+    // Tworzenie argumentów dla director
+    char reg_pid_str[10], pat_pid_str[10], doctor_pids_str[NUM_DOCTORS][10];
+    sprintf(reg_pid_str, "%d", registration_pid);
+    sprintf(pat_pid_str, "%d", patient_pid);
+    
+    char *args[NUM_DOCTORS + 4];  
+    args[0] = "director";
+    args[1] = reg_pid_str;
+    args[2] = pat_pid_str;
+
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        sprintf(doctor_pids_str[i], "%d", doctor_pids[i]);
+        args[i + 3] = doctor_pids_str[i];
+    }
+
+    args[NUM_DOCTORS + 3] = NULL;  
+
+    // Tworzenie procesu dyrektora z przekazaniem PID-ów
     director_pid = fork();
     if (director_pid == 0) {
-        execl(PATH "director", "director", NULL);
+        execv(PATH "director", args);
         perror("Błąd uruchamiania procesu dyrektora");
         exit(EXIT_FAILURE);
     }
 
-    // Jeśli uruchomiono program z -d, czekamy 10 sekund, a potem zamykamy przychodnię
+    // Tryb ewakuacji (-d)
     if (argc == 2 && strcmp(argv[1], "-d") == 0) {
-        send_signal_to_all();
+        sleep(EVACUATION_TIME);
+        kill(director_pid, SIGUSR2);
+        wait_for_processes();
         exit(0);
     }
 
-    // Oczekiwanie na zakończenie pracy wszystkich procesów
-    waitpid(registration_pid, NULL, 0);
-    waitpid(patient_pid, NULL, 0);
-    waitpid(director_pid, NULL, 0);
-    for (int i = 0; i < NUM_DOCTORS; i++) {
-        waitpid(doctor_pids[i], NULL, 0);
+    // Tryb normalny (przychodnia działa do 20:00)
+    printf("Rozpoczynamy pracę placówki o godzinie %02d:00\n", CLINIC_OPEN_HOUR);
+
+    while (current_hour < CLINIC_CLOSE_HOUR) {
+        sleep(SIMULATION_TIME);
+        update_time();
     }
+
+    // Normalne zamknięcie
+    kill(director_pid, SIGUSR1);
+    wait_for_processes();
 
     printf("Przychodnia zamknięta.\n");
     return 0;
