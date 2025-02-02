@@ -18,15 +18,14 @@ volatile bool running = true;
 
 void handle_sigusr2(int sig) {
     (void)sig;
-    printf("Pacjenci: Otrzymano SIGUSR2 – wszyscy pacjenci natychmiast opuszczają przychodnię.\n");
+    printf("Pacjenci: Zarządzono ewakuację, opuszczamy przychodnię.\n");
     exit(0);
 }
-
 
 int main() {
     signal(SIGUSR2, handle_sigusr2);
     
-    printf("Generator pacjentów uruchomiony, PID: %d\n", getpid());
+    printf("Pacjenci przychodzą do placówki, PID: %d\n", getpid());
 
     int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
     if (msg_queue_id == -1) {
@@ -62,6 +61,6 @@ int main() {
         sleep(1);  // Co sekundę generujemy nowego pacjenta
     }
 
-    printf("🏃‍♂️ Generator pacjentów zakończył działanie.\n");
+    printf("Pacjenci przestali przychodzić do placówki.\n");
     return 0;
 }

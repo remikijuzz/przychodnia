@@ -16,9 +16,9 @@ pid_t doctor_pids[NUM_DOCTORS];
 void send_signal_to_all() {
     printf("\nDyrektor: Przychodnia rozpoczęła normalną pracę.\n");
     
-    sleep(10);  // Przychodnia działa normalnie przez 10 sekund
+    sleep(SIMULATION_TIME);  // Przychodnia działa normalnie przez określony czas
 
-    printf("\nDyrektor: Informuję pacjentów i lekarzy, że przychodnia jest zamykana – proszę opuścić budynek.\n");
+    printf("\nDyrektor: Zarządzam ewakuację placówki, proszę opuścić budynek.\n");
 
     // Natychmiast zatrzymujemy generowanie nowych pacjentów
     kill(patient_pid, SIGUSR2);
@@ -33,11 +33,9 @@ void send_signal_to_all() {
         kill(doctor_pids[i], SIGUSR2);
     }
     sleep(2);
-
+    printf("Dyrektor opuścił budynek.\n");
     printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
 }
-
-
 
 int main(int argc, char *argv[]) {
     printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);

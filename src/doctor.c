@@ -43,7 +43,7 @@ void handle_sigusr1(int sig) {
 
 void handle_sigusr2(int sig) {
     (void)sig;
-    printf("%s: Otrzymano SIGUSR2 – opuszczam gabinet i kończę pracę.\n", doctor_specializations[doctor_id]);
+    printf("%s: Ewakuacja, opuszczamy budynek.\n", doctor_specializations[doctor_id]);
     exit(0);
 }
 
@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
     signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
 
-    printf("%s uruchomiony, PID: %d\n", doctor_specializations[doctor_id], getpid());
+    printf("%s rozpoczął pracę, PID: %d\n", doctor_specializations[doctor_id], getpid());
 
     int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
     if (msg_queue_id == -1) {

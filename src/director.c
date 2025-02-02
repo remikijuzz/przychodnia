@@ -3,76 +3,74 @@
 #include <unistd.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <time.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include "config.h"
 #include "patient.h"
+#include "doctor.h"
 #include "registration.h"
 
-#define MAX_PATIENTS 10
-
 volatile bool running = true;
-int patients_seen = 0;
-bool shutting_down = false;  // 
+pid_t doctor_pids[NUM_DOCTORS];  // Tablica PID-ów lekarzy
+pid_t registration_pid;           // PID procesu rejestracji
+pid_t patient_pid;     
 
-void handle_sigusr1(int sig) {
+void handle_sigint(int sig) {
     (void)sig;
-    printf("Lekarz: Otrzymano SIGUSR1 – kończę przyjmowanie pacjentów...\n");
-    shutting_down = true;
+    printf("Dyrektor: Otrzymano SIGINT – zamykam przychodnię.\n");
+    running = false;
 }
 
-void handle_sigusr2(int sig) {
-    (void)sig;
-    printf("Lekarz: Otrzymano SIGUSR2, natychmiastowe zamknięcie!\n");
+void send_signal_to_doctor(int doctor_id) {
+    if (doctor_id < 0 || doctor_id >= NUM_DOCTORS) {
+        printf("Dyrektor: Niepoprawne ID lekarza.\n");
+        return;
+    }
+    printf("Dyrektor: Wysyłam SIGUSR1 do %d (PID %d)...\n", doctor_id, doctor_pids[doctor_id]);
+    kill(doctor_pids[doctor_id], SIGUSR1);
+}
+
+void close_clinic() {
+    printf("\nDyrektor: Informuję pacjentów i lekarzy, że przychodnia jest zamykana – proszę opuścić budynek.\n");
+
+    // Zamknięcie generatora pacjentów
+    kill(patient_pid, SIGUSR2);
+    sleep(1);
+
+    // Zamknięcie rejestracji
+    kill(registration_pid, SIGUSR2);
+    sleep(1);
+
+    // Zamknięcie lekarzy
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        kill(doctor_pids[i], SIGUSR2);
+    }
+    sleep(2);
+
+    printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
     exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Błąd: Brak ID lekarza\n");
-        exit(EXIT_FAILURE);
+    signal(SIGINT, handle_sigint);
+
+    if (argc > 1) {
+        if (argv[1][0] == '-' && argv[1][1] == 'd') {
+            if (argv[1][2] >= '0' && argv[1][2] <= '9') {
+                int doctor_id = argv[1][2] - '0';
+                send_signal_to_doctor(doctor_id);
+                return 0;
+            } else {
+                close_clinic();
+            }
+        }
     }
 
-    srand(time(NULL));
-
-    int doctor_id = atoi(argv[1]);
-    signal(SIGUSR1, handle_sigusr1);
-    signal(SIGUSR2, handle_sigusr2);
-
-    printf("Lekarz ID %d uruchomiony, PID: %d\n", doctor_id, getpid());
-
-    int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
-    if (msg_queue_id == -1) {
-        perror("Błąd otwierania kolejki komunikatów");
-        exit(EXIT_FAILURE);
-    }
+    printf("Dyrektor: Przychodnia działa normalnie.\n");
 
     while (running) {
-        sleep(2);
-
-        if (patients_seen < MAX_PATIENTS) {
-            PatientMessage msg;
-            if (msgrcv(msg_queue_id, &msg, sizeof(Patient), 1, IPC_NOWAIT) != -1) {
-                printf("Lekarz %d: Przyjmuję pacjenta ID %d (%d/%d), VIP: %d\n",
-                       doctor_id, msg.patient.id, patients_seen + 1, MAX_PATIENTS, msg.patient.is_vip);
-                patients_seen++;
-            } else {
-                printf("⚕️ Lekarz %d: Brak pacjentów w kolejce.\n", doctor_id);
-            }
-        } else {
-            printf("Lekarz %d: Osiągnięto limit pacjentów.\n", doctor_id);
-            running = false;
-        }
-
-        // Jeśli lekarz dostał SIGUSR1, czeka chwilę, zanim zakończy pracę
-        if (shutting_down) {
-            int delay = rand() % 4 + 3;  // Losowe opóźnienie 3-6 sekund
-            printf("Lekarz %d: Kończę pracę za %d sekund...\n", doctor_id, delay);
-            sleep(delay);
-            running = false;
-        }
+        sleep(1);
     }
 
-    printf("Lekarz %d zakończył pracę.\n", doctor_id);
     return 0;
 }

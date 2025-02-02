@@ -15,7 +15,7 @@
 #define MSG_QUEUE_KEY 1234
 
 volatile bool running = true;
-int liczba_pacjentow_w_budynku = 0;
+int liczba_pacjentów_w_budynku = 0;
 
 void save_to_report(int patient_id, const char *reason) {
     FILE *file = fopen("report.txt", "a");
@@ -29,13 +29,13 @@ void save_to_report(int patient_id, const char *reason) {
 
 void handle_sigusr2(int sig) {
     (void)sig;
-    printf("Rejestracja: Otrzymano SIGUSR2, kończę pracę.\n");
+    printf("Rejestracja: Dyrektor zarządził ewakuację, opuszczamy budynek.\n");
     running = false;
 }
 
 int main() {
     signal(SIGUSR2, handle_sigusr2);
-    printf("Rejestracja uruchomiona\n");
+    printf("Rejestracja uruchomiona.\n");
 
     int msg_queue_id = msgget(MSG_QUEUE_KEY, IPC_CREAT | 0666);
     if (msg_queue_id == -1) {
@@ -46,10 +46,10 @@ int main() {
     while (running) {
         PatientMessage msg;
         if (msgrcv(msg_queue_id, &msg, sizeof(Patient), 1, IPC_NOWAIT) != -1) {
-            if (liczba_pacjentow_w_budynku >= MAX_PATIENTS_IN_BUILDING) {
+            if (liczba_pacjentów_w_budynku >= MAX_PATIENTS_IN_BUILDING) {
                 save_to_report(msg.patient.id, "Przychodnia pełna – pacjent czekał przed wejściem.");
             } else {
-                liczba_pacjentow_w_budynku++;
+                liczba_pacjentów_w_budynku++;
                 printf("Pacjent ID %d zapisany do rejestracji.\n", msg.patient.id);
             }
         }
