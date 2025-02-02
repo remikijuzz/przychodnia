@@ -24,9 +24,26 @@ const char *doctor_specializations[] = {
     "Lekarz Medycyny Pracy"
 };
 
+void save_to_report(int patient_id, const char *doctor_name) {
+    FILE *file = fopen("report.txt", "a");
+    if (file == NULL) {
+        perror("Błąd otwierania pliku raportu");
+        return;
+    }
+    fprintf(file, "Pacjent ID %d nie został przyjęty przez %s – brak miejsc.\n", patient_id, doctor_name);
+    fclose(file);
+}
+
+void handle_sigusr1(int sig) {
+    (void)sig;
+    printf("%s: Kończę przyjmowanie pacjentów i zapisuję raport.\n", doctor_specializations[doctor_id]);
+    save_to_report(-1, doctor_specializations[doctor_id]);  
+    exit(0);
+}
+
 void handle_sigusr2(int sig) {
     (void)sig;
-    printf("Lekarz %s: Otrzymano SIGUSR2 – opuszczam gabinet i kończę pracę.\n", doctor_specializations[doctor_id]);
+    printf("%s: Otrzymano SIGUSR2 – opuszczam gabinet i kończę pracę.\n", doctor_specializations[doctor_id]);
     exit(0);
 }
 
@@ -39,6 +56,7 @@ int main(int argc, char *argv[]) {
     srand(time(NULL));
 
     doctor_id = atoi(argv[1]);
+    signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
 
     printf("%s uruchomiony, PID: %d\n", doctor_specializations[doctor_id], getpid());
@@ -58,6 +76,18 @@ int main(int argc, char *argv[]) {
                 printf("%s: Przyjmuję pacjenta ID %d (%d/%d), VIP: %d\n",
                        doctor_specializations[doctor_id], msg.patient.id, patients_seen + 1, MAX_PATIENTS, msg.patient.is_vip);
                 patients_seen++;
+
+                if (doctor_id == 0 || doctor_id == 1) {  // Lekarze POZ
+                    if (rand() % 100 < 20) {  // 20% pacjentów dostaje skierowanie
+                        int specialist_id = 2 + (rand() % 4);
+                        printf("%s skierował pacjenta ID %d do %s\n", 
+                               doctor_specializations[doctor_id], msg.patient.id, doctor_specializations[specialist_id]);
+                        
+                        if (patients_seen >= MAX_PATIENTS) {
+                            save_to_report(msg.patient.id, doctor_specializations[specialist_id]);
+                        }
+                    }
+                }
             } else {
                 printf("%s: Brak pacjentów w kolejce.\n", doctor_specializations[doctor_id]);
             }
