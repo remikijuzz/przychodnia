@@ -8,7 +8,7 @@
 #include <time.h>
 #include "patient.h"
 #include "registration.h"
-
+//
 #define MAX_PATIENTS 10
 
 volatile bool running = true;
