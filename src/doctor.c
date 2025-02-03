@@ -9,23 +9,16 @@
 #include "patient.h"
 
 #define MAX_DOCTORS 6
-#define MAX_QUEUE_SIZE 20
 
 volatile bool running = true;
 pthread_t doctors[MAX_DOCTORS];
 
-// Semafory kolejek pacjentów
 sem_t *poz_queue_sem;
 sem_t *specialist_queue_sems[4];
+sem_t *building_capacity;  // Nowe: zwalnianie miejsca w przychodni
 
 pthread_mutex_t poz_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t specialist_mutexes[4];
-
-Patient poz_queue[MAX_QUEUE_SIZE];
-Patient specialist_queues[4][MAX_QUEUE_SIZE];
-
-int poz_queue_size = 0;
-int specialist_queue_sizes[4] = {0};
 
 const char *doctor_specializations[] = {
     "Lekarz POZ 1",
@@ -36,11 +29,15 @@ const char *doctor_specializations[] = {
     "Lekarz Medycyny Pracy"
 };
 
-// Obsługa sygnałów
 void handle_sigusr1(int sig) {
     (void)sig;
     printf("Lekarze: Kończę na dzisiaj.\n");
     running = false;
+
+    for (int i = 0; i < 4; i++) {
+        sem_post(specialist_queue_sems[i]);
+    }
+    sem_post(poz_queue_sem);
 }
 
 void handle_sigusr2(int sig) {
@@ -49,7 +46,6 @@ void handle_sigusr2(int sig) {
     exit(0);
 }
 
-// Funkcja obsługi wątku lekarza
 void *doctor_thread(void *arg) {
     int doctor_id = *(int *)arg;
     free(arg);
@@ -57,31 +53,29 @@ void *doctor_thread(void *arg) {
     printf("%s rozpoczął pracę.\n", doctor_specializations[doctor_id]);
 
     while (running) {
-        Patient p;
         bool patient_found = false;
 
-        if (doctor_id < 2) {  // Lekarze POZ mają wspólną kolejkę
-            sem_wait(poz_queue_sem);  
-            pthread_mutex_lock(&poz_mutex);
-            if (poz_queue_size > 0) {
-                p = poz_queue[--poz_queue_size];
+        if (doctor_id < 2) {
+            if (sem_trywait(poz_queue_sem) == 0) {
+                pthread_mutex_lock(&poz_mutex);
                 patient_found = true;
+                pthread_mutex_unlock(&poz_mutex);
             }
-            pthread_mutex_unlock(&poz_mutex);
-        } else {  
+        } else {
             int spec_index = doctor_id - 2;
-            sem_wait(specialist_queue_sems[spec_index]);  
-            pthread_mutex_lock(&specialist_mutexes[spec_index]);
-            if (specialist_queue_sizes[spec_index] > 0) {
-                p = specialist_queues[spec_index][--specialist_queue_sizes[spec_index]];
+            if (sem_trywait(specialist_queue_sems[spec_index]) == 0) {
+                pthread_mutex_lock(&specialist_mutexes[spec_index]);
                 patient_found = true;
+                pthread_mutex_unlock(&specialist_mutexes[spec_index]);
             }
-            pthread_mutex_unlock(&specialist_mutexes[spec_index]);
         }
 
         if (patient_found) {
-            printf("%s: Przyjmuje pacjenta ID %d\n", doctor_specializations[doctor_id], p.id);
-            sleep(2);  
+            printf("%s: Przyjmuje pacjenta.\n", doctor_specializations[doctor_id]);
+            sleep(2);
+            sem_post(building_capacity);  // **Nowe: zwalnianie miejsca w budynku**
+        } else {
+            sleep(1);
         }
     }
 
@@ -93,9 +87,11 @@ int main() {
     signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
 
-    printf("Uruchamianie lekarzy...\n");
+    printf("Lekarze rozpoczynają pracę...\n");
 
     poz_queue_sem = sem_open("/poz_queue", O_CREAT, 0666, 0);
+    building_capacity = sem_open("/building_capacity", O_CREAT, 0666, 50);
+    
     for (int i = 0; i < 4; i++) {
         specialist_queue_sems[i] = sem_open("/spec_queue", O_CREAT, 0666, 0);
         pthread_mutex_init(&specialist_mutexes[i], NULL);
@@ -109,6 +105,16 @@ int main() {
 
     for (int i = 0; i < MAX_DOCTORS; i++) {
         pthread_join(doctors[i], NULL);
+    }
+
+    sem_close(poz_queue_sem);
+    sem_unlink("/poz_queue");
+    sem_close(building_capacity);
+    sem_unlink("/building_capacity");
+
+    for (int i = 0; i < 4; i++) {
+        sem_close(specialist_queue_sems[i]);
+        sem_unlink("/spec_queue");
     }
 
     printf("Wszyscy lekarze zakończyli pracę.\n");
