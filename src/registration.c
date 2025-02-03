@@ -1,69 +1,79 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <fcntl.h>
-#include <semaphore.h>
 #include "patient.h"
-#include "config.h"
 
-#define MAX_PATIENTS_IN_BUILDING 50
-#define MSG_QUEUE_KEY 1234
+#define MAX_QUEUE_SIZE 20  
 
 volatile bool running = true;
-int liczba_pacjentów_w_budynku = 0;
+sem_t *registration_queue;
+sem_t *building_capacity;
+sem_t *poz_queue_sem;
+sem_t *specialist_queue_sems[4];
 
-void save_to_report(int patient_id, const char *reason) {
-    FILE *file = fopen("report.txt", "a");
-    if (file == NULL) {
-        perror("Błąd otwierania pliku raportu");
-        return;
-    }
-    fprintf(file, "Pacjent ID %d nie został przyjęty: %s\n", patient_id, reason);
-    fclose(file);
-}
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+Patient queue[MAX_QUEUE_SIZE];
+int queue_index = 0;
 
 void handle_sigusr1(int sig) {
     (void)sig;
-    printf("Rejestracja: Przychodnia zostala zamknieta.\n");
+    printf("Rejestracja: Przychodnia została zamknięta.\n");
     running = false;
+    sem_post(registration_queue);
 }
 
 void handle_sigusr2(int sig) {
     (void)sig;
-    printf("Rejestracja: Dyrektor zarządził ewakuację, opuszczamy budynek.\n");
+    printf("Rejestracja: Dyrektor zarządził ewakuację, opuszczamy przychodnię.\n");
     exit(0);
 }
 
+void *registration_thread(void *arg) {
+    (void)arg;
+    while (running) {
+        sem_wait(registration_queue);
+
+        pthread_mutex_lock(&queue_mutex);
+        if (queue_index > 0) {
+            Patient p = queue[--queue_index];
+            printf("Rejestracja: Pacjent ID %d zarejestrowany!\n", p.id);
+
+            if (p.target_doctor < 2) {
+                sem_post(poz_queue_sem);
+            } else {
+                sem_post(specialist_queue_sems[p.target_doctor - 2]);
+            }
+        }
+        pthread_mutex_unlock(&queue_mutex);
+    }
+    pthread_exit(NULL);
+}
 
 int main() {
     signal(SIGUSR1, handle_sigusr1);
-    signal(SIGUSR2, handle_sigusr2);    
-    printf("Rejestracja uruchomiona.\n");
+    signal(SIGUSR2, handle_sigusr2);
 
-    int msg_queue_id = msgget(MSG_QUEUE_KEY, IPC_CREAT | 0666);
-    if (msg_queue_id == -1) {
-        perror("Błąd otwierania kolejki komunikatów");
-        exit(EXIT_FAILURE);
+    registration_queue = sem_open("/registration_queue", O_CREAT, 0666, 0);
+    building_capacity = sem_open("/building_capacity", O_CREAT, 0666, MAX_QUEUE_SIZE);
+    poz_queue_sem = sem_open("/poz_queue", O_CREAT, 0666, 0);
+
+    for (int i = 0; i < 4; i++) {
+        specialist_queue_sems[i] = sem_open("/spec_queue", O_CREAT, 0666, 0);
     }
 
-    while (running) {
-        PatientMessage msg;
-        if (msgrcv(msg_queue_id, &msg, sizeof(Patient), 1, IPC_NOWAIT) != -1) {
-            if (liczba_pacjentów_w_budynku >= MAX_PATIENTS_IN_BUILDING) {
-                save_to_report(msg.patient.id, "Przychodnia pełna – pacjent czekał przed wejściem.");
-            } else {
-                liczba_pacjentów_w_budynku++;
-                printf("Pacjent ID %d zapisany do rejestracji.\n", msg.patient.id);
-            }
-        }
-        sleep(1);
-    }
+    pthread_t reg_thread;
+    pthread_create(&reg_thread, NULL, registration_thread, NULL);
+    pthread_join(reg_thread, NULL);
 
-    printf("Rejestracja zakończyła pracę.\n");
+    sem_close(registration_queue);
+    sem_unlink("/registration_queue");
+    sem_close(building_capacity);
+    sem_unlink("/building_capacity");
+
     return 0;
 }

@@ -1,26 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
+#include <pthread.h>
 #include <semaphore.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
 #include "patient.h"
-#include "config.h"
 
-#define MSG_QUEUE_KEY 1234
-#define MAX_PATIENTS_IN_BUILDING 50  // Limit pacjentów w budynku
+#define MAX_PATIENTS_IN_BUILDING 50  
 
 volatile bool running = true;
-
-void handle_sigusr2(int sig) {
-    (void)sig;
-    printf("Pacjenci: Zarządzono ewakuację, opuszczamy przychodnię.\n");
-    exit(0);
-}
+sem_t *building_capacity;
+sem_t *registration_queue;
 
 void handle_sigusr1(int sig) {
     (void)sig;
@@ -28,47 +20,49 @@ void handle_sigusr1(int sig) {
     running = false;
 }
 
+void handle_sigusr2(int sig) {
+    (void)sig;
+    printf("Pacjenci: Dyrektor zarządził ewakuację, opuszczamy przychodnię.\n");
+    exit(0);
+}
+
+void *patient_thread(void *arg) {
+    (void)arg;
+
+    Patient p;
+    p.id = rand() % 1000;
+    p.target_doctor = rand() % 6;
+
+    if (sem_trywait(building_capacity) == 0) {
+        printf("Pacjent ID %d wszedł do budynku i idzie do rejestracji.\n", p.id);
+        sem_post(registration_queue);
+    } else {
+        printf("Brak miejsca w przychodni, pacjent ID %d czeka przed wejściem.\n", p.id);
+    }
+
+    pthread_exit(NULL);
+}
+
 int main() {
     signal(SIGUSR1, handle_sigusr1);
     signal(SIGUSR2, handle_sigusr2);
-   
 
-    printf("Pacjenci przychodzą do placówki, PID: %d\n", getpid());
+    printf("Pacjenci przychodzą do placówki.\n");
 
-    int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
-    if (msg_queue_id == -1) {
-        perror("Błąd otwierania kolejki komunikatów");
-        exit(EXIT_FAILURE);
-    }
-
-    sem_t *building_capacity = sem_open("/building_capacity", O_CREAT, 0666, MAX_PATIENTS_IN_BUILDING);
-    if (building_capacity == SEM_FAILED) {
-        perror("Błąd otwierania semafora budynku");
-        exit(EXIT_FAILURE);
-    }
+    building_capacity = sem_open("/building_capacity", O_CREAT, 0666, MAX_PATIENTS_IN_BUILDING);
+    registration_queue = sem_open("/registration_queue", O_CREAT, 0666, 0);
 
     while (running) {
-        Patient p;
-        p.id = rand() % 1000;
-        p.is_vip = rand() % 5 == 0;  // 20% pacjentów to VIP
-        p.target_doctor = rand() % NUM_DOCTORS;
-        p.age = rand() % 90;  // Wiek pacjenta
-
-        printf("Nowy pacjent ID %d, lekarz %d, VIP: %d\n", p.id, p.target_doctor, p.is_vip);
-
-        // Sprawdzamy, czy jest miejsce w budynku
-        if (sem_trywait(building_capacity) == 0) {
-            PatientMessage msg;
-            msg.msg_type = 1;
-            msg.patient = p;
-            msgsnd(msg_queue_id, &msg, sizeof(Patient), 0);
-        } else {
-            printf("Brak miejsca w przychodni, pacjent ID %d czeka przed wejściem.\n", p.id);
-        }
-
-        sleep(1);  // Co sekundę generujemy nowego pacjenta
+        pthread_t patient_tid;
+        pthread_create(&patient_tid, NULL, patient_thread, NULL);
+        pthread_detach(patient_tid);
+        sleep(1);
     }
 
-    printf("Pacjenci przestali przychodzić do placówki.\n");
+    sem_close(building_capacity);
+    sem_unlink("/building_capacity");
+    sem_close(registration_queue);
+    sem_unlink("/registration_queue");
+
     return 0;
 }

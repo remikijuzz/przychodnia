@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -Iinclude -pthread
 
 SRC_DIR = src
 
-EXECUTABLES = $(SRC_DIR)/przychodnia $(SRC_DIR)/registration $(SRC_DIR)/doctor $(SRC_DIR)/patient $(SRC_DIR)/director
+EXECUTABLES = $(SRC_DIR)/przychodnia $(SRC_DIR)/registration $(SRC_DIR)/doctor $(SRC_DIR)/patient
 
 all: $(EXECUTABLES)
 

@@ -1,19 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <time.h>
 #include "patient.h"
-#include "registration.h"
 
-#define MAX_PATIENTS 10
+#define MAX_DOCTORS 6
 
 volatile bool running = true;
-int patients_seen = 0;
-static int doctor_id;
+pthread_t doctors[MAX_DOCTORS];
+
+sem_t *poz_queue_sem;
+sem_t *specialist_queue_sems[4];
+sem_t *building_capacity;  // Nowe: zwalnianie miejsca w przychodni
+
+pthread_mutex_t poz_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t specialist_mutexes[4];
 
 const char *doctor_specializations[] = {
     "Lekarz POZ 1",
@@ -24,79 +29,94 @@ const char *doctor_specializations[] = {
     "Lekarz Medycyny Pracy"
 };
 
-
-void save_to_report(int patient_id, const char *doctor_name) {
-    FILE *file = fopen("report.txt", "a");
-    if (file == NULL) {
-        perror("Błąd otwierania pliku raportu");
-        return;
-    }
-    fprintf(file, "Pacjent ID %d nie został przyjęty przez %s – brak miejsc.\n", patient_id, doctor_name);
-    fclose(file);
-}
-
 void handle_sigusr1(int sig) {
     (void)sig;
-    printf("%s: Kończę przyjmowanie pacjentów i zapisuję raport.\n", doctor_specializations[doctor_id]);
+    printf("Lekarze: Kończę na dzisiaj.\n");
     running = false;
+
+    for (int i = 0; i < 4; i++) {
+        sem_post(specialist_queue_sems[i]);
+    }
+    sem_post(poz_queue_sem);
 }
 
 void handle_sigusr2(int sig) {
     (void)sig;
-    printf("%s: Ewakuacja, opuszczamy budynek.\n", doctor_specializations[doctor_id]);
+    printf("Lekarze: Dyrektor zarządził ewakuację, opuszczamy budynek.\n");
     exit(0);
 }
 
-int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Błąd: Brak ID lekarza\n");
-        exit(EXIT_FAILURE);
-    }
+void *doctor_thread(void *arg) {
+    int doctor_id = *(int *)arg;
+    free(arg);
 
-    srand(time(NULL));
-
-    doctor_id = atoi(argv[1]);
-    signal(SIGUSR1, handle_sigusr1);
-    signal(SIGUSR2, handle_sigusr2);
-
-    printf("%s rozpoczął pracę, PID: %d\n", doctor_specializations[doctor_id], getpid());
-
-    int msg_queue_id = msgget(MSG_QUEUE_KEY, 0666);
-    if (msg_queue_id == -1) {
-        perror("Błąd otwierania kolejki komunikatów");
-        exit(EXIT_FAILURE);
-    }
+    printf("%s rozpoczął pracę.\n", doctor_specializations[doctor_id]);
 
     while (running) {
-        sleep(2);
+        bool patient_found = false;
 
-        if (patients_seen < MAX_PATIENTS) {
-            PatientMessage msg;
-            if (msgrcv(msg_queue_id, &msg, sizeof(Patient), 1, IPC_NOWAIT) != -1) {
-                printf("%s: Przyjmuję pacjenta ID %d (%d/%d), VIP: %d\n",
-                       doctor_specializations[doctor_id], msg.patient.id, patients_seen + 1, MAX_PATIENTS, msg.patient.is_vip);
-                patients_seen++;
-
-                if (doctor_id == 0 || doctor_id == 1) {  // Lekarze POZ
-                    if (rand() % 100 < 20) {  // 20% pacjentów dostaje skierowanie
-                        int specialist_id = 2 + (rand() % 4);
-                        printf("%s skierował pacjenta ID %d do %s\n", 
-                               doctor_specializations[doctor_id], msg.patient.id, doctor_specializations[specialist_id]);
-                        
-                        if (patients_seen >= MAX_PATIENTS) {
-                            save_to_report(msg.patient.id, doctor_specializations[specialist_id]);
-                        }
-                    }
-                }
-            } else {
-                printf("%s: Brak pacjentów w kolejce.\n", doctor_specializations[doctor_id]);
+        if (doctor_id < 2) {
+            if (sem_trywait(poz_queue_sem) == 0) {
+                pthread_mutex_lock(&poz_mutex);
+                patient_found = true;
+                pthread_mutex_unlock(&poz_mutex);
             }
         } else {
-            printf("%s: Osiągnięto limit pacjentów.\n", doctor_specializations[doctor_id]);
-            running = false;
+            int spec_index = doctor_id - 2;
+            if (sem_trywait(specialist_queue_sems[spec_index]) == 0) {
+                pthread_mutex_lock(&specialist_mutexes[spec_index]);
+                patient_found = true;
+                pthread_mutex_unlock(&specialist_mutexes[spec_index]);
+            }
+        }
+
+        if (patient_found) {
+            printf("%s: Przyjmuje pacjenta.\n", doctor_specializations[doctor_id]);
+            sleep(2);
+            sem_post(building_capacity);  // **Nowe: zwalnianie miejsca w budynku**
+        } else {
+            sleep(1);
         }
     }
 
-    printf("%s zakończył pracę i opuszcza przychodnię.\n", doctor_specializations[doctor_id]);
+    printf("%s zakończył pracę.\n", doctor_specializations[doctor_id]);
+    pthread_exit(NULL);
+}
+
+int main() {
+    signal(SIGUSR1, handle_sigusr1);
+    signal(SIGUSR2, handle_sigusr2);
+
+    printf("Lekarze rozpoczynają pracę...\n");
+
+    poz_queue_sem = sem_open("/poz_queue", O_CREAT, 0666, 0);
+    building_capacity = sem_open("/building_capacity", O_CREAT, 0666, 50);
+    
+    for (int i = 0; i < 4; i++) {
+        specialist_queue_sems[i] = sem_open("/spec_queue", O_CREAT, 0666, 0);
+        pthread_mutex_init(&specialist_mutexes[i], NULL);
+    }
+
+    for (int i = 0; i < MAX_DOCTORS; i++) {
+        int *id = malloc(sizeof(int));
+        *id = i;
+        pthread_create(&doctors[i], NULL, doctor_thread, id);
+    }
+
+    for (int i = 0; i < MAX_DOCTORS; i++) {
+        pthread_join(doctors[i], NULL);
+    }
+
+    sem_close(poz_queue_sem);
+    sem_unlink("/poz_queue");
+    sem_close(building_capacity);
+    sem_unlink("/building_capacity");
+
+    for (int i = 0; i < 4; i++) {
+        sem_close(specialist_queue_sems[i]);
+        sem_unlink("/spec_queue");
+    }
+
+    printf("Wszyscy lekarze zakończyli pracę.\n");
     return 0;
 }
