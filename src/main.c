@@ -2,15 +2,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <sys/types.h>
-#include <signal.h>
-#include <string.h>
-#include "config.h"
 
-#define PATH "./src/"
-#define EVACUATION_TIME 10  // Czas działania przed ewakuacją
-#define SIMULATION_TIME 5   // Czas między zmianami godzin w symulacji
+#define NUM_DOCTORS 6
 
+<<<<<<< HEAD
 pid_t registration_pid, patient_pid, doctor_pid;
 int current_hour = CLINIC_OPEN_HOUR;
 
@@ -24,19 +19,28 @@ void wait_for_processes() {
     if (registration_pid > 0) waitpid(registration_pid, &status, 0);
     if (patient_pid > 0) waitpid(patient_pid, &status, 0);
     if (doctor_pid > 0) waitpid(doctor_pid, &status, 0);
+=======
+pid_t doctor_pids[NUM_DOCTORS];
+pid_t registration_pid;
+
+void spawn_doctor(int id) {
+    doctor_pids[id] = fork();
+    if (doctor_pids[id] == 0) {
+        char buffer[10];
+        sprintf(buffer, "%d", id);
+        execl("./src/doctor", "doctor", buffer, NULL);
+    }
+>>>>>>> a8f733d (Rebuild projektu zgodnie z konsultacjami)
 }
 
-int main(int argc, char *argv[]) {
-    printf("Przychodnia otwarta od %d:00 do %d:00\n", CLINIC_OPEN_HOUR, CLINIC_CLOSE_HOUR);
-
-    // Tworzenie procesu rejestracji
+void spawn_registration() {
     registration_pid = fork();
     if (registration_pid == 0) {
-        execl(PATH "registration", "registration", NULL);
-        perror("Błąd uruchamiania procesu rejestracji");
-        exit(EXIT_FAILURE);
+        execl("./src/registration", "registration", NULL);
     }
+}
 
+<<<<<<< HEAD
     // Tworzenie procesu lekarzy
     doctor_pid = fork();
     if (doctor_pid == 0) {
@@ -85,5 +89,32 @@ int main(int argc, char *argv[]) {
     wait_for_processes();
 
     printf("Dyrektor: Przychodnia została zamknięta – wszyscy pacjenci i lekarze opuścili budynek.\n");
+=======
+void spawn_patients() {
+    for (int i = 0; i < 10; i++) {
+        if (fork() == 0) {
+            execl("./src/patient", "patient", NULL);
+        }
+        sleep(1);
+    }
+}
+
+int main() {
+    printf("Przychodnia otwarta\n");
+
+    spawn_registration();
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        spawn_doctor(i);
+    }
+
+    spawn_patients();
+
+    for (int i = 0; i < NUM_DOCTORS; i++) {
+        waitpid(doctor_pids[i], NULL, 0);
+    }
+    waitpid(registration_pid, NULL, 0);
+
+    printf("Przychodnia zamknięta\n");
+>>>>>>> a8f733d (Rebuild projektu zgodnie z konsultacjami)
     return 0;
 }

@@ -1,6 +1,8 @@
+#include "structs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+<<<<<<< HEAD
 #include <pthread.h>
 #include <semaphore.h>
 #include <fcntl.h>
@@ -32,6 +34,18 @@ const char *doctor_specializations[] = {
 void handle_sigusr1(int sig) {
     (void)sig;
     printf("Lekarze: Kończę na dzisiaj.\n");
+=======
+#include <sys/msg.h>
+#include <signal.h>
+
+#define DOCTOR_QUEUE_KEY 2000
+
+volatile bool running = true;
+
+void handle_sigusr1(int sig) {
+    (void)sig;
+    printf("Lekarz: Kończę przyjmowanie pacjentów.\n");
+>>>>>>> a8f733d (Rebuild projektu zgodnie z konsultacjami)
     running = false;
 
     for (int i = 0; i < 4; i++) {
@@ -42,6 +56,7 @@ void handle_sigusr1(int sig) {
 
 void handle_sigusr2(int sig) {
     (void)sig;
+<<<<<<< HEAD
     printf("Lekarze: Dyrektor zarządził ewakuację, opuszczamy budynek.\n");
     exit(0);
 }
@@ -118,5 +133,28 @@ int main() {
     }
 
     printf("Wszyscy lekarze zakończyli pracę.\n");
+=======
+    printf("Lekarz: Natychmiastowa ewakuacja!\n");
+    exit(0);
+}
+
+int main(int argc, char *argv[]) {
+    (void)argc;
+    signal(SIGUSR1, handle_sigusr1);
+    signal(SIGUSR2, handle_sigusr2);
+
+    int doctor_id = atoi(argv[1]);
+    int msgid = msgget(DOCTOR_QUEUE_KEY + doctor_id, 0666 | IPC_CREAT);
+    
+    Message msg;
+    while (running) {
+        if (msgrcv(msgid, &msg, sizeof(Patient), 0, IPC_NOWAIT) > 0) {
+            printf("Lekarz %d: Przyjmuję pacjenta %d\n", doctor_id, msg.patient.id);
+            sleep(2);
+        }
+    }
+
+    printf("Lekarz %d zakończył pracę.\n", doctor_id);
+>>>>>>> a8f733d (Rebuild projektu zgodnie z konsultacjami)
     return 0;
 }
