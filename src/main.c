@@ -90,7 +90,11 @@ int main(int argc, char *argv[]) {
 
     // Tryb ewakuacji (-d)
     if (argc == 2 && strcmp(argv[1], "-d") == 0) {
-        sleep(EVACUATION_TIME);
+        
+        while (current_hour < EVACUATION_TIME) {
+        sleep(SIMULATION_TIME);
+        update_time();
+    }
         kill(director_pid, SIGUSR2);
         wait_for_processes();
         exit(0);
