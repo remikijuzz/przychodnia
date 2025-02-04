@@ -74,27 +74,6 @@ W raportach zapisywane są informacje o pacjentach, którzy nie zostali przyjęc
 Obsługa sygnałów przez moduł dyrektora:
 Dzięki oddzielnemu modułowi dyrektora możliwe jest wysyłanie sygnałów do konkretnych grup procesów (lekarze lub pacjenci), co wpływa na natychmiastowe zakończenie ich pracy.
 
-6. Linki do istotnych fragmentów kodu
-Poniżej znajdują się linki do fragmentów kodu na GitHub, które obrazują użyte konstrukcje systemowe:
-
-Tworzenie i obsługa plików:
-main.c – tworzenie kolejki komunikatów, otwieranie semafora
-
-Tworzenie procesów:
-main.c – fork(), execl(), wait()
-
-Tworzenie i obsługa wątków:
-registration.c – pthread_create(), pthread_join(), pthread_mutex_lock(), pthread_cond_wait()
-
-Obsługa sygnałów:
-doctor.c – sigaction(), kill()
-
-Synchronizacja procesów/wątków:
-registration.c – semafory, mutex i kolejka komunikatów
-
-Kolejki komunikatów:
-main.c i registration.c – ftok(), msgget(), msgsnd(), msgrcv(), msgctl()
-
-7. Podsumowanie
+6. Podsumowanie
 Projekt „Przychodnia” spełnia wszystkie wymagania opisane w specyfikacji. W ramach projektu zaimplementowano wszystkie kluczowe moduły (Dyrektor, Rejestracja, Lekarz, Pacjent) wraz z odpowiednią synchronizacją oraz obsługą błędów. Mimo napotkanych trudności, zwłaszcza w zakresie obsługi sygnałów, udało się wypracować rozwiązania pozwalające na dynamiczną obsługę symulacji. Dodatkowo, w projekcie zastosowano mechanizmy raportowania, które umożliwiają analizę działania systemu oraz identyfikację ewentualnych błędów w trakcie testów.
 
