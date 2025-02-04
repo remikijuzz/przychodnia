@@ -7,11 +7,16 @@
 #include <sys/msg.h>
 #include <signal.h>
 #include <pthread.h>
+#include <semaphore.h>   // dodany nagłówek
+#include <fcntl.h>       // dla O_CREAT, O_EXCL
 
 #define NUM_DOCTORS 6
 #define NUM_PATIENTS 100
 #define OPENING_TIME 8   // Godzina otwarcia
 #define CLOSING_TIME 16  // Godzina zamknięcia
+
+#define MAX_PATIENTS_INSIDE 10     // Maksymalna liczba pacjentów wewnątrz budynku
+#define SEM_NAME "/clinic_sem"     // Nazwa semafora
 
 int msg_queue;
 int current_time = OPENING_TIME;
@@ -39,6 +44,13 @@ int main() {
 
     if (msg_queue == -1) {
         perror("Błąd przy tworzeniu kolejki komunikatów");
+        exit(1);
+    }
+
+    // Utworzenie semafora ograniczającego liczbę pacjentów wewnątrz budynku.
+    sem_t *clinic_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, MAX_PATIENTS_INSIDE);
+    if (clinic_sem == SEM_FAILED) {
+        perror("Błąd przy tworzeniu semafora");
         exit(1);
     }
 
@@ -100,6 +112,10 @@ int main() {
     for (int i = 0; i < patient_count; i++) {
         waitpid(patient_pids[i], NULL, 0);
     }
+
+    // Zamknięcie i usunięcie semafora
+    sem_close(clinic_sem);
+    sem_unlink(SEM_NAME);
 
     msgctl(msg_queue, IPC_RMID, NULL);
     printf("Przychodnia zamknięta\n");
