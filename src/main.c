@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -7,28 +8,58 @@
 #include <sys/msg.h>
 #include <signal.h>
 #include <pthread.h>
-#include <semaphore.h>   // dodany nagłówek
-#include <fcntl.h>       // dla O_CREAT, O_EXCL
-#include <string.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 #define NUM_DOCTORS 6
-#define NUM_PATIENTS 100
+#define NUM_PATIENTS 200
 #define OPENING_TIME 8   // Godzina otwarcia
 #define CLOSING_TIME 16  // Godzina zamknięcia
+#define MAX_PATIENTS_INSIDE 10
+#define SEM_NAME "/clinic_sem"
 
-#define MAX_PATIENTS_INSIDE 10     // Maksymalna liczba pacjentów jednocześnie wewnątrz budynku
-#define SEM_NAME "/clinic_sem"     // Nazwa semafora
-
-// Globalne zmienne symulacyjne
+// Globalne zmienne
 int msg_queue;
 int current_time = OPENING_TIME;
 int clinic_open = 1;
 pthread_mutex_t time_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Funkcja zegara – symulacja upływu czasu
+pid_t reg_pid;
+pid_t doctor_pids[NUM_DOCTORS];
+pid_t patient_pids[NUM_PATIENTS];
+int patient_count = 0;
+sem_t *clinic_sem = NULL;
+
+// Wątek obsługujący sygnał SIGUSR2 – po jego odebraniu czyścimy zasoby i kończymy działanie.
+void *signal_handler_thread(void *arg) {
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGUSR2);
+    int sig;
+    if (sigwait(&waitset, &sig) == 0) {
+        printf("Dyrektor: Zarządzono ewakuację, prosimy o opuszczenie placówki.\n");
+        fflush(stdout);
+        // Zabijamy proces rejestracji, lekarzy oraz pacjentów
+        kill(reg_pid, SIGTERM);
+        for (int i = 0; i < NUM_DOCTORS; i++) {
+            kill(doctor_pids[i], SIGTERM);
+        }
+        for (int i = 0; i < patient_count; i++) {
+            kill(patient_pids[i], SIGTERM);
+        }
+        // Sprzątamy zasoby
+        sem_close(clinic_sem);
+        sem_unlink(SEM_NAME);
+        msgctl(msg_queue, IPC_RMID, NULL);
+        exit(0);
+    }
+    return NULL;
+}
+
+// Wątek symulujący upływ czasu – co 4 sekundy symulowany czas zwiększa się o 1 godzinę.
 void* time_simulation(void* arg) {
     while (current_time < CLOSING_TIME) {
-        sleep(5);  // Co 5 sekund symulujemy 1 godzinę
+        sleep(4);  // Co 4 sekundy symulujemy przeskok o 1 godzinę
         pthread_mutex_lock(&time_mutex);
         current_time++;
         printf("Czas: %02d:00\n", current_time);
@@ -39,125 +70,133 @@ void* time_simulation(void* arg) {
     return NULL;
 }
 
-int main(int argc, char *argv[]) {
-    // Parametr testowy – domyślnie brak
-    // test_signal = 0 -> brak, 1 -> wyślij SIGUSR1, 2 -> wyślij SIGUSR2
-    int test_signal = 0;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-s1") == 0)
-            test_signal = 1;
-        else if (strcmp(argv[i], "-s2") == 0)
-            test_signal = 2;
+int main() {
+    // Zapisujemy PID głównego procesu do pliku main_pid.txt
+    FILE *fp_main = fopen("main_pid.txt", "w");
+    if (fp_main) {
+        fprintf(fp_main, "%d\n", getpid());
+        fclose(fp_main);
+    } else {
+        perror("Błąd przy zapisie main_pid.txt");
     }
-
+    
+    // Blokujemy SIGUSR2 we wszystkich wątkach, aby tylko dedykowany wątek go odbierał.
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR2);
+    if (pthread_sigmask(SIG_BLOCK, &set, NULL) != 0) {
+        perror("Błąd przy blokowaniu SIGUSR2");
+        exit(1);
+    }
+    
     key_t key = ftok("clinic", 65);
     msg_queue = msgget(key, IPC_CREAT | 0666);
     if (msg_queue == -1) {
         perror("Błąd przy tworzeniu kolejki komunikatów");
         exit(1);
     }
-
-    // Usunięcie semafora, jeśli już istnieje
+    
     sem_unlink(SEM_NAME);
-    sem_t *clinic_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, MAX_PATIENTS_INSIDE);
+    clinic_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, MAX_PATIENTS_INSIDE);
     if (clinic_sem == SEM_FAILED) {
         perror("Błąd przy tworzeniu semafora");
         exit(1);
     }
-
+    
     printf("Przychodnia otwarta od 08:00 do 16:00\n");
-
-    // Uruchamiamy zegar symulacyjny
-    pthread_t time_thread;
+    
+    pthread_t time_thread, sig_thread;
     pthread_create(&time_thread, NULL, time_simulation, NULL);
-
-    pid_t reg_pid, doctor_pids[NUM_DOCTORS], patient_pids[NUM_PATIENTS];
-
-    // Uruchamiamy proces rejestracji
+    pthread_create(&sig_thread, NULL, signal_handler_thread, NULL);
+    
+    // Tworzymy proces rejestracji
     reg_pid = fork();
     if (reg_pid == 0) {
         execl("./registration", "registration", NULL);
-        perror("Błąd uruchamiania registration");
+        perror("Błąd uruchamiania rejestracji");
         exit(1);
     }
-
-    // Uruchamiamy procesy lekarzy – tutaj przekazujemy argument określający rolę
+    FILE *fp_reg = fopen("registration_pid.txt", "w");
+    if (fp_reg) {
+        fprintf(fp_reg, "%d\n", reg_pid);
+        fclose(fp_reg);
+    } else {
+        perror("Błąd przy zapisie registration_pid.txt");
+    }
+    
+    // Tworzymy procesy lekarzy
+    const char *doctor_roles[NUM_DOCTORS] = {"POZ", "POZ", "kardiolog", "okulista", "pediatra", "lekarz_medycyny_pracy"};
+    FILE *fp_doc = fopen("doctor_pids.txt", "w");
+    if (!fp_doc) {
+        perror("Błąd przy otwieraniu doctor_pids.txt do zapisu");
+        exit(1);
+    }
     for (int i = 0; i < NUM_DOCTORS; i++) {
         doctor_pids[i] = fork();
         if (doctor_pids[i] == 0) {
-            if (i < 2)
-                execl("./doctor", "doctor", "POZ", NULL);
-            else if (i == 2)
-                execl("./doctor", "doctor", "kardiolog", NULL);
-            else if (i == 3)
-                execl("./doctor", "doctor", "okulista", NULL);
-            else if (i == 4)
-                execl("./doctor", "doctor", "pediatra", NULL);
-            else if (i == 5)
-                execl("./doctor", "doctor", "lekarz_medycyny_pracy", NULL);
-            perror("Błąd uruchamiania doctor");
+            execl("./doctor", "doctor", doctor_roles[i], NULL);
+            perror("Błąd uruchamiania lekarza");
             exit(1);
         }
+        fprintf(fp_doc, "%d\n", doctor_pids[i]);
     }
-
-    int patient_count = 0;
-    while (clinic_open && patient_count < NUM_PATIENTS) {
+    fclose(fp_doc);
+    
+    // Tworzymy procesy pacjentów
+    FILE *fp_pat = fopen("patient_pids.txt", "w");
+    if (!fp_pat) {
+        perror("Błąd przy otwieraniu patient_pids.txt do zapisu");
+        exit(1);
+    }
+    while (current_time < CLOSING_TIME && patient_count < NUM_PATIENTS) {
         patient_pids[patient_count] = fork();
         if (patient_pids[patient_count] == 0) {
             execl("./patient", "patient", NULL);
-            perror("Błąd uruchamiania patient");
+            perror("Błąd uruchamiania pacjenta");
             exit(1);
         }
+        fprintf(fp_pat, "%d\n", patient_pids[patient_count]);
         patient_count++;
         sleep(1);
     }
-
-    // Jeśli mamy aktywowany tryb testowy sygnału, czekamy chwilę i wysyłamy sygnał
-    if (test_signal == 1) {
-        // Przykładowo: czekamy 15 sekund, a następnie wysyłamy SIGUSR1
-        sleep(15);
-        printf("Dyrektor: Wysyłam SIGUSR1 (bada bieżącego pacjenta i kończy przyjmowanie) do procesów lekarzy i rejestracji.\n");
-        kill(reg_pid, SIGUSR1);
-        for (int i = 0; i < NUM_DOCTORS; i++) {
-            kill(doctor_pids[i], SIGUSR1);
-        }
-    } else if (test_signal == 2) {
-        // Przykładowo: czekamy 15 sekund, a następnie wysyłamy SIGUSR2
-        sleep(15);
-        printf("Dyrektor: Wysyłam SIGUSR2 (natychmiastowa ewakuacja) do wszystkich procesów.\n");
-        kill(reg_pid, SIGUSR2);
-        for (int i = 0; i < NUM_DOCTORS; i++) {
-            kill(doctor_pids[i], SIGUSR2);
-        }
-        for (int i = 0; i < patient_count; i++) {
-            kill(patient_pids[i], SIGUSR2);
-        }
-    }
-
-    // Czekamy na zakończenie zegara
-    pthread_join(time_thread, NULL);
-
-    printf("Przychodnia zamyka drzwi, lekarze kończą przyjmowanie pacjentów...\n");
-
+    fclose(fp_pat);
+    
+        
+    // Wysyłamy SIGTERM do procesów: rejestracji, lekarzy oraz (jeśli jeszcze działają) pacjentów.
     kill(reg_pid, SIGTERM);
     for (int i = 0; i < NUM_DOCTORS; i++) {
         kill(doctor_pids[i], SIGTERM);
     }
     for (int i = 0; i < patient_count; i++) {
-        kill(patient_pids[i], SIGTERM);
+        if (patient_pids[i] != -1) {
+            kill(patient_pids[i], SIGTERM);
+        }
     }
-
+    
+    // Dajemy szansę procesom na porządne zakończenie, a w razie potrzeby wymuszamy zabicie.
+    int status;
+    pid_t result = waitpid(reg_pid, &status, WNOHANG);
+    if (result == 0) {
+        // Proces rejestracji jeszcze działa – czekamy chwilę i wymuszamy zabicie
+        sleep(2);
+        kill(reg_pid, SIGKILL);
+        waitpid(reg_pid, &status, 0);
+    }
+    
     waitpid(reg_pid, NULL, 0);
     for (int i = 0; i < NUM_DOCTORS; i++) {
         waitpid(doctor_pids[i], NULL, 0);
     }
     for (int i = 0; i < patient_count; i++) {
-        waitpid(patient_pids[i], NULL, 0);
+        if (patient_pids[i] != -1) {
+            waitpid(patient_pids[i], NULL, 0);
+        }
     }
-
+    
     sem_close(clinic_sem);
     sem_unlink(SEM_NAME);
     msgctl(msg_queue, IPC_RMID, NULL);
-    printf("Przychodnia zamknięta\n");
+    
+    printf("Przychodnia zamknięta.\n");
     return 0;
 }
