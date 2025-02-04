@@ -12,6 +12,8 @@ Lekarz (Doctor) – moduł przyjmujący pacjentów, który uwzględnia limity pr
 Pacjent (Patient) – symuluje zachowanie pacjenta (wraz z opcjonalnym dzieckiem), wchodzenie do przychodni, rejestrację, wizytę u lekarza oraz opuszczanie przychodni.
 Przy projektowaniu użyto różnych mechanizmów synchronizacji (semafory, kolejki komunikatów, wątki) oraz obsługi sygnałów. Wszystkie dane wprowadzane przez użytkownika (np. liczba procesów) są sprawdzane, a w przypadku błędów wykorzystywana jest funkcja perror() wraz z wartością zmiennej errno.
 
+Po uruchomieniu ./przychodnia aby wysłać sygnał Dyrektora do ewakuacji musimy uruchomić ./director -s2
+
 W projekcie przydzielono minimalne prawa dostępu do struktur systemowych, a wszystkie utworzone struktury (kolejki komunikatów, semafory) są usuwane po zakończeniu symulacji, zgodnie z wymaganiami.
 
 2. Ogólny opis kodu
@@ -55,8 +57,11 @@ Zaimplementowano mechanizmy raportowania – informacje o pacjentach, którzy ni
 Stworzono oddzielny moduł Dyrektora umożliwiający wysyłanie sygnału.
 
 
-4. Synchronizacja i obsługa sygnałów:
-Początkowo napotkaliśmy trudności z natychmiastowym reagowaniem procesów pacjentów na sygnał SIGUSR2. Próbowano różnych metod (asynchroniczny handler, wątek sygnałowy, signalfd), ale rozwiązanie, które miało globalnie zakończyć pracę symulacji, wymagało starannego dostosowania momentu wysłania sygnału oraz synchronizacji pomiędzy procesami.
+4. Problemy:
+
+Początkowo to w ogóle nie wiedziałem jak poprawnie zrobić ten projekt więc zaczynając od programu "jednowątkowego" przeszedłem do programu który uruchamia wiele procesów. 
+
+Napotkałem trudności z natychmiastowym reagowaniem procesów pacjentów na sygnał SIGUSR2. Próbowano różnych metod (asynchroniczny handler, wątek sygnałowy, signalfd), ale rozwiązanie, które miało globalnie zakończyć pracę symulacji, wymagało starannego dostosowania momentu wysłania sygnału oraz synchronizacji pomiędzy procesami.
 
 Testowanie:
 Problemem była też synchronizacja pomiędzy procesami – sygnał musiał być wysłany w odpowiednim momencie, gdy procesy pacjentów jeszcze działały. Wymagało to modyfikacji mechanizmów oczekiwania (np. stosowanie sem_trywait czy sem_timedwait) oraz sprawdzania flag, aby sygnał mógł być prawidłowo odebrany i natychmiast przerywał działanie procesu.
