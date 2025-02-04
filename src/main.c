@@ -41,12 +41,13 @@ void* time_simulation(void* arg) {
 int main() {
     key_t key = ftok("clinic", 65);
     msg_queue = msgget(key, IPC_CREAT | 0666);
-
     if (msg_queue == -1) {
         perror("Błąd przy tworzeniu kolejki komunikatów");
         exit(1);
     }
 
+    // Usunięcie (unlink) semafora, jeśli już istnieje
+    sem_unlink(SEM_NAME);
     // Utworzenie semafora ograniczającego liczbę pacjentów wewnątrz budynku.
     sem_t *clinic_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, MAX_PATIENTS_INSIDE);
     if (clinic_sem == SEM_FAILED) {
@@ -93,7 +94,7 @@ int main() {
     // Czekamy na zamknięcie przychodni (czyli na zakończenie zegara)
     pthread_join(time_thread, NULL);
 
-    // O 16:00 przychodnia zamyka drzwi, ale lekarze kończą pracę
+    // O 16:00 przychodnia zamyka drzwi, ale lekarze kończą przyjmowanie pacjentów
     printf("Przychodnia zamyka drzwi, lekarze kończą przyjmowanie pacjentów...\n");
 
     kill(reg_pid, SIGTERM);
