@@ -1,8 +1,0 @@
-RAPORT ZAMKNIĘCIA LEKARZA kardiolog (PID: 64768):
-Lekarz kardiolog (PID: 64768): Przychodnia zamknięta (sygnał 15 - SIGTERM). Przyjęto 5 pacjentów.
-RAPORT ZAMKNIĘCIA LEKARZA okulista (PID: 64769):
-Lekarz okulista (PID: 64769): Przychodnia zamknięta (sygnał 15 - SIGTERM). Przyjęto 1 pacjentów.
-RAPORT ZAMKNIĘCIA LEKARZA pediatra (PID: 64772):
-Lekarz pediatra (PID: 64772): Przychodnia zamknięta (sygnał 15 - SIGTERM). Przyjęto 7 pacjentów.
-RAPORT ZAMKNIĘCIA LEKARZA lekarz_medycyny_pracy (PID: 64773):
-Lekarz lekarz_medycyny_pracy (PID: 64773): Przychodnia zamknięta (sygnał 15 - SIGTERM). Przyjęto 2 pacjentów.
