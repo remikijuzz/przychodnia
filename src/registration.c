@@ -1,34 +1,24 @@
-#define _POSIX_C_SOURCE 200809L
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/msg.h>
-#include <unistd.h>
+#include "clinic.h"
 #include <pthread.h>
-#include <string.h>
-#include <signal.h>
 
-#define MAX_PATIENTS_INSIDE 10
-#define THRESHOLD_OPEN (MAX_PATIENTS_INSIDE / 2)   // np. 5
-#define THRESHOLD_CLOSE (MAX_PATIENTS_INSIDE / 3)    // np. 3
+#define _POSIX_C_SOURCE 200809L
+#define REG_MAX_QUEUE 10
+#define THRESHOLD_OPEN (REG_MAX_QUEUE / 2)   // np. 5
+#define THRESHOLD_CLOSE (REG_MAX_QUEUE / 3)    // np. 3
 
-// Struktura komunikatu – pacjent wysyła komunikat rejestracyjny (msg_type = 1)
-struct message {
-    long msg_type;
-    int patient_id;
-    char msg_text[100];
-    int specialist_type; // Dodane pole do przechowywania typu specjalisty (dla skierowań)
-};
 
-// Struktura węzła kolejki pacjentów
+/* Węzeł kolejki pacjentów */
 typedef struct PatientNode {
     int patient_id;
     char msg_text[100];
+    int msg_type;
+    int specialist_type;
     struct PatientNode *next;
 } PatientNode;
 
-PatientNode* queue_head = NULL;
-PatientNode* queue_tail = NULL;
-int queue_length = 0;
+static PatientNode* queue_head = NULL;
+static PatientNode* queue_tail = NULL;
+static int queue_length = 0;
 
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
@@ -40,16 +30,15 @@ void sigterm_handler(int signum) {
     running = 0;
 }
 
-void enqueue(int patient_id, const char* msg_text) {
+void enqueue(int patient_id, const char* msg_text, int msg_type, int specialist_type) {
     PatientNode *node = malloc(sizeof(PatientNode));
-    if (!node) {
-        perror("Błąd alokacji pamięci");
-        exit(1);
-    }
+    if (!node) { perror("Błąd alokacji pamięci"); exit(1); }
     node->patient_id = patient_id;
     strncpy(node->msg_text, msg_text, sizeof(node->msg_text));
+    node->msg_type = msg_type;
+    node->specialist_type = specialist_type;
     node->next = NULL;
-    if (queue_tail == NULL) {
+    if (!queue_tail) {
         queue_head = queue_tail = node;
     } else {
         queue_tail->next = node;
@@ -58,15 +47,15 @@ void enqueue(int patient_id, const char* msg_text) {
     queue_length++;
 }
 
-int dequeue(int *patient_id, char *msg_text) {
-    if (queue_head == NULL)
-        return 0;
+int dequeue(int *patient_id, char *msg_text, int *msg_type, int *specialist_type) {
+    if (!queue_head) return 0;
     PatientNode *node = queue_head;
     *patient_id = node->patient_id;
     strncpy(msg_text, node->msg_text, 100);
+    *msg_type = node->msg_type;
+    *specialist_type = node->specialist_type;
     queue_head = node->next;
-    if (queue_head == NULL)
-        queue_tail = NULL;
+    if (!queue_head) queue_tail = NULL;
     free(node);
     queue_length--;
     return 1;
@@ -75,9 +64,9 @@ int dequeue(int *patient_id, char *msg_text) {
 void* reader_thread_func(void* arg) {
     struct message msg;
     while (running) {
-        if (msgrcv(msg_queue, &msg, sizeof(msg) - sizeof(long), 1, IPC_NOWAIT) > 0) {
+        if (msgrcv(msg_queue, &msg, sizeof(msg) - sizeof(long), MSG_TYPE_REGISTRATION, IPC_NOWAIT) > 0) {
             pthread_mutex_lock(&queue_mutex);
-            enqueue(msg.patient_id, msg.msg_text);
+            enqueue(msg.patient_id, msg.msg_text, msg.msg_type, msg.specialist_type);
             pthread_cond_signal(&queue_cond);
             pthread_mutex_unlock(&queue_mutex);
         } else {
@@ -92,71 +81,60 @@ void* registration_window_func(void* arg) {
     free(arg);
     while (running) {
         pthread_mutex_lock(&queue_mutex);
-        while (queue_length == 0 && running) {
+        while (queue_length == 0 && running)
             pthread_cond_wait(&queue_cond, &queue_mutex);
-        }
         if (!running) {
             pthread_mutex_unlock(&queue_mutex);
             break;
         }
-        struct message msg;
-        int patient_id;
+        int patient_id, msg_type, specialist_type;
         char msg_text[100];
-        if (dequeue(&patient_id, msg_text)) {
+        if (dequeue(&patient_id, msg_text, &msg_type, &specialist_type)) {
             pthread_mutex_unlock(&queue_mutex);
-            printf("Okienko rejestracji %d: Rejestruję pacjenta %d. Wiadomość: %s\n",
-                   window_number, patient_id, msg_text);
+            printf("Okienko rejestracji %d: Rejestruję pacjenta %d – %s\n", window_number, patient_id, msg_text);
             sleep(1);
-
+            
             int doctor_msg_queue;
             key_t doctor_key;
-            int msg_type = 0; // Domyślna wartość, na wypadek błędu (choć nie powinna wystąpić)
-
-
-            // Ustalenie msg_type na podstawie skierowania (msg.msg_type = 7) LUB wyboru pacjenta (msg.msg_type = 2-6)
-            if (msg.msg_type == 7) {
-                 msg_type = msg.specialist_type; // Typ specjalisty ze skierowania
-            } else if (msg.msg_type >= 2 && msg.msg_type <= 6) {
-                 msg_type = msg.msg_type; // Typ lekarza wybrany przez pacjenta przy rejestracji
-            } else {
-                //fprintf(stderr, "Nieznany typ komunikatu w rejestracji: %ld\n", msg.msg_type);
-                continue; // Przejdź do następnego pacjenta w kolejce rejestracji
-            }
-
-
-            if (msg_type == 2 || msg_type == 8) { // POZ lub VIP POZ
+            int target_msg_type = 0;
+            if (msg_type == MSG_TYPE_REFERRAL)
+                target_msg_type = specialist_type;
+            else if (msg_type >= MSG_TYPE_POZ && msg_type <= MSG_TYPE_MEDYCYNY_PRACY)
+                target_msg_type = msg_type;
+            else
+                continue;
+            
+            if (target_msg_type == MSG_TYPE_POZ || target_msg_type == MSG_TYPE_VIP_POZ)
                 doctor_key = ftok("clinic_poz", 65);
-            } else if (msg_type == 3 || msg_type == 9) { // kardiolog lub VIP kardiolog
+            else if (target_msg_type == MSG_TYPE_KARDIOLOG || target_msg_type == MSG_TYPE_VIP_KARDIOLOG)
                 doctor_key = ftok("clinic_kardiolog", 65);
-            } else if (msg_type == 4 || msg_type == 10) { // okulista lub VIP okulista
+            else if (target_msg_type == MSG_TYPE_OKULISTA || target_msg_type == MSG_TYPE_VIP_OKULISTA)
                 doctor_key = ftok("clinic_okulista", 65);
-            } else if (msg_type == 5 || msg_type == 11) { // pediatra lub VIP pediatra
+            else if (target_msg_type == MSG_TYPE_PEDIATRA || target_msg_type == MSG_TYPE_VIP_PEDIATRA)
                 doctor_key = ftok("clinic_pediatra", 65);
-            } else if (msg_type == 6 || msg_type == 12) { // lekarz medycyny pracy lub VIP medycyny pracy
+            else if (target_msg_type == MSG_TYPE_MEDYCYNY_PRACY || target_msg_type == MSG_TYPE_VIP_MEDYCYNY_PRACY)
                 doctor_key = ftok("clinic_medycyny_pracy", 65);
-            } else {
-                fprintf(stderr, "Nieznany typ lekarza: %d\n", msg_type);
-                continue; // Przejdź do następnego pacjenta w kolejce rejestracji
-            }
-
+            else
+                continue;
+            
             doctor_msg_queue = msgget(doctor_key, 0666);
             if (doctor_msg_queue == -1) {
                 perror("Błąd przy otwieraniu kolejki lekarza");
-                continue; // Przejdź do następnego pacjenta w kolejce rejestracji
+                continue;
             }
-
+            
             struct message doctor_msg;
-            doctor_msg.msg_type = msg_type; // Przekazujemy poprawny msg_type (2-6 lub 8-12)
+            doctor_msg.msg_type = target_msg_type;
             doctor_msg.patient_id = patient_id;
-            strcpy(doctor_msg.msg_text, (msg.msg_type == 7) ? "Skierowanie z POZ" : "Pacjent zarejestrowany"); // Rozróżnienie komunikatu w zależności czy skierowanie czy rejestracja
-
-            if (msgsnd(doctor_msg_queue, &doctor_msg, sizeof(doctor_msg) - sizeof(long), 0) < 0) {
+            if (msg_type == MSG_TYPE_REFERRAL)
+                strcpy(doctor_msg.msg_text, "Skierowanie z POZ");
+            else
+                strcpy(doctor_msg.msg_text, "Pacjent zarejestrowany");
+            
+            if (msgsnd(doctor_msg_queue, &doctor_msg, sizeof(doctor_msg) - sizeof(long), 0) < 0)
                 perror("Błąd przy wysyłaniu komunikatu do lekarza");
-            } else {
-                printf("Okienko rejestracji %d: Pacjent %d skierowany do lekarza (typ: %d).\n", window_number, patient_id, msg_type);
-            }
-
-
+            else
+                printf("Okienko %d: Pacjent %d skierowany do lekarza (typ: %d).\n", window_number, patient_id, target_msg_type);
         } else {
             pthread_mutex_unlock(&queue_mutex);
         }
@@ -170,22 +148,19 @@ void log_remaining_patients() {
     if (queue_length > 0) {
         FILE *fp = fopen("report.txt", "a");
         if (fp) {
-            fprintf(fp, "RAPORT ZAMKNIĘCIA REJESTRACJI:\n"); // Dodany nagłówek raportu
+            fprintf(fp, "RAPORT ZAMKNIĘCIA REJESTRACJI:\n");
             PatientNode *current = queue_head;
             while (current) {
-                fprintf(fp, "Pacjent %d nie został przyjęty (Przychodnia zamknięta - kolejka rejestracji). Wiadomość: %s\n", // Dodana przyczyna
-                        current->patient_id, current->msg_text);
+                fprintf(fp, "Pacjent %d nie został przyjęty – %s\n", current->patient_id, current->msg_text);
                 current = current->next;
             }
             fclose(fp);
-        } else {
-            perror("Błąd przy otwieraniu report.txt");
         }
     }
     pthread_mutex_unlock(&queue_mutex);
 }
 
-int main() {
+int main(void) {
     signal(SIGTERM, sigterm_handler);
     
     key_t key = ftok("clinic", 65);
@@ -204,10 +179,6 @@ int main() {
     }
     
     int *w1 = malloc(sizeof(int));
-    if (!w1) {
-        perror("Błąd alokacji pamięci dla okienka 1");
-        exit(1);
-    }
     *w1 = 1;
     if (pthread_create(&window1_thread, NULL, registration_window_func, w1) != 0) {
         perror("Błąd przy tworzeniu okienka rejestracji 1");
@@ -221,10 +192,6 @@ int main() {
         
         if (!window2_active && qlen >= THRESHOLD_OPEN) {
             int *w2 = malloc(sizeof(int));
-            if (!w2) {
-                perror("Błąd alokacji pamięci dla okienka 2");
-                exit(1);
-            }
             *w2 = 2;
             if (pthread_create(&window2_thread, NULL, registration_window_func, w2) == 0) {
                 window2_active = 1;
@@ -255,13 +222,11 @@ int main() {
     
     log_remaining_patients();
     
-    pthread_mutex_lock(&queue_mutex);
     while (queue_length > 0) {
-        int dummy_id;
+        int dummy_id, dummy_type, dummy_spec;
         char dummy_text[100];
-        dequeue(&dummy_id, dummy_text);
+        dequeue(&dummy_id, dummy_text, &dummy_type, &dummy_spec);
     }
-    pthread_mutex_unlock(&queue_mutex);
     
     printf("Rejestracja kończy działanie.\n");
     return 0;
