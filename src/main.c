@@ -1,33 +1,74 @@
 #define _POSIX_C_SOURCE 200809L
 #include <unistd.h>
 #include "clinic.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <errno.h>
 
+// Globalne zmienne
+int clinic_open = 1;
 pid_t reg_pid;
 pid_t doctor_pids[NUM_DOCTORS];
 pid_t patient_pids[NUM_PATIENTS];
 int patient_count = 0;
 int current_time = OPENING_TIME;
-int clinic_open = 1;
 pthread_mutex_t time_mutex = PTHREAD_MUTEX_INITIALIZER;
 sem_t *clinic_sem = NULL;
 
-// Kolejki komunikatów – globalnie
+/* IPC kolejki */
 int msg_queue, poz_queue, kardiolog_queue, okulista_queue, pediatra_queue, medycyny_pracy_queue;
 
+/* Mutex do synchronizacji dostępu do tablicy pacjentów */
+pthread_mutex_t patient_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Wątek zbierający (reapujący) procesy pacjentów */
+void *patient_waiter_thread(void *arg) {
+    int status;
+    while (1) {
+        int all_reaped = 1;
+        pthread_mutex_lock(&patient_mutex);
+        for (int i = 0; i < patient_count; i++) {
+            if (patient_pids[i] != -1) {  // Proces jeszcze nie został odebrany
+                all_reaped = 0;
+                pid_t pid = waitpid(patient_pids[i], &status, WNOHANG);
+                if (pid > 0) {
+                    printf("Patient process %d reaped\n", pid);
+                    patient_pids[i] = -1;  // Oznaczamy, że został odebrany
+                }
+            }
+        }
+        pthread_mutex_unlock(&patient_mutex);
+        if (!clinic_open && all_reaped) {
+            break;
+        }
+        usleep(100000); 
+    }
+    return NULL;
+}
+
+
+/* Wątek obsługi sygnału SIGUSR2 (ewakuacja) */
 void *signal_handler_thread(void *arg) {
     sigset_t waitset;
     int sig;
     sigemptyset(&waitset);
     sigaddset(&waitset, SIGUSR2);
     if (sigwait(&waitset, &sig) == 0) {
-        printf("Dyrektor: Zarządzono ewakuację, prosimy o opuszczenie placówki.\n");
+        printf("Dyrektor: Ewakuacja – proszę o opuszczenie placówki.\n");
         kill(reg_pid, SIGTERM);
         for (int i = 0; i < NUM_DOCTORS; i++) {
             kill(doctor_pids[i], SIGTERM);
         }
+        pthread_mutex_lock(&patient_mutex);
         for (int i = 0; i < patient_count; i++) {
-            kill(patient_pids[i], SIGTERM);
+            if (patient_pids[i] != -1) {
+                kill(patient_pids[i], SIGTERM);
+            }
         }
+        pthread_mutex_unlock(&patient_mutex);
         sem_close(clinic_sem);
         sem_unlink(SEM_NAME);
         msgctl(msg_queue, IPC_RMID, NULL);
@@ -41,21 +82,23 @@ void *signal_handler_thread(void *arg) {
     return NULL;
 }
 
-void* time_simulation(void* arg) {
+/* Wątek symulacji upływu czasu */
+void *time_simulation(void *arg) {
     while (current_time < CLOSING_TIME) {
-        sleep(4);
+        sleep(4); // co 4 sekundy symulujemy wzrost godziny o 1
         pthread_mutex_lock(&time_mutex);
         current_time++;
         printf("Czas: %02d:00\n", current_time);
         pthread_mutex_unlock(&time_mutex);
     }
     clinic_open = 0;
-    printf("Przychodnia jest zamknięta, ale lekarze kończą pracę...\n");
+    printf("Przychodnia jest zamknięta, lekarze kończą pracę...\n");
     return NULL;
 }
 
 int main(void) {
-    /* Zapisanie PID głównego procesu do pliku */
+    
+    /* Zapisanie PID głównego procesu */
     FILE *fp_main = fopen("main_pid.txt", "w");
     if (fp_main) {
         fprintf(fp_main, "%d\n", getpid());
@@ -64,7 +107,7 @@ int main(void) {
         perror("Błąd przy zapisie main_pid.txt");
     }
 
-    /* Blokowanie SIGUSR2 i SIGUSR1 we wszystkich wątkach */
+    /* Blokowanie SIGUSR2 oraz SIGUSR1 we wszystkich wątkach (ale nie SIGTSTP) */
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGUSR2);
@@ -99,7 +142,7 @@ int main(void) {
     medycyny_pracy_queue = msgget(key_medycyny_pracy, IPC_CREAT | 0666);
     if (medycyny_pracy_queue == -1) { perror("Błąd przy tworzeniu medycyny_pracy_queue"); exit(1); }
 
-    /* Utworzenie semafora symulującego maksymalną liczbę pacjentów wewnątrz */
+    /* Utworzenie semafora – ogranicza liczbę pacjentów wewnątrz przychodni */
     sem_unlink(SEM_NAME);
     clinic_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, MAX_PATIENTS_INSIDE);
     if (clinic_sem == SEM_FAILED) {
@@ -109,15 +152,29 @@ int main(void) {
 
     printf("Przychodnia otwarta od 08:00 do 16:00\n");
 
-    pthread_t time_thread, sig_thread;
-    pthread_create(&time_thread, NULL, time_simulation, NULL);
-    pthread_create(&sig_thread, NULL, signal_handler_thread, NULL);
+    pthread_t time_tid, sig_tid, patient_waiter_tid;
+    if (pthread_create(&time_tid, NULL, time_simulation, NULL) != 0) {
+        perror("Błąd przy tworzeniu wątku symulacji czasu");
+        exit(1);
+    }
+    if (pthread_create(&sig_tid, NULL, signal_handler_thread, NULL) != 0) {
+        perror("Błąd przy tworzeniu wątku obsługi sygnałów");
+        exit(1);
+    }
+    if (pthread_create(&patient_waiter_tid, NULL, patient_waiter_thread, NULL) != 0) {
+        perror("Błąd przy tworzeniu wątku zbierającego pacjentów");
+        exit(1);
+    }
 
     /* Tworzenie procesu rejestracji */
     reg_pid = fork();
+    if (reg_pid == -1) {
+        perror("Błąd przy fork rejestracji");
+        exit(1);
+    }
     if (reg_pid == 0) {
         execl("./registration", "registration", NULL);
-        perror("Błąd przy uruchamianiu registration");
+        perror("Błąd uruchamiania registration");
         exit(1);
     }
     FILE *fp_reg = fopen("registration_pid.txt", "w");
@@ -131,6 +188,10 @@ int main(void) {
     if (!fp_doc) { perror("Błąd przy otwieraniu doctor_pids.txt"); exit(1); }
     for (int i = 0; i < NUM_DOCTORS; i++) {
         doctor_pids[i] = fork();
+        if (doctor_pids[i] == -1) {
+            perror("Błąd przy fork dla lekarza");
+            exit(1);
+        }
         if (doctor_pids[i] == 0) {
             execl("./doctor", "doctor", doctor_roles[i], NULL);
             perror("Błąd uruchamiania lekarza");
@@ -148,16 +209,26 @@ int main(void) {
     if (!fp_pat) { perror("Błąd przy otwieraniu patient_pids.txt"); exit(1); }
     while (current_time < CLOSING_TIME && patient_count < NUM_PATIENTS) {
         int sem_val;
-        sem_getvalue(clinic_sem, &sem_val);
+        if (sem_getvalue(clinic_sem, &sem_val) == -1) {
+            perror("Błąd przy sem_getvalue");
+            exit(1);
+        }
         if (sem_val > 0) {
-            patient_pids[patient_count] = fork();
-            if (patient_pids[patient_count] == 0) {
+            pid_t pid = fork();
+            if (pid == -1) {
+                perror("Błąd przy fork pacjenta");
+                exit(1);
+            }
+            if (pid == 0) {
                 execl("./patient", "patient", NULL);
                 perror("Błąd uruchamiania pacjenta");
                 exit(1);
             }
-            fprintf(fp_pat, "%d\n", patient_pids[patient_count]);
+            pthread_mutex_lock(&patient_mutex);
+            patient_pids[patient_count] = pid;
             patient_count++;
+            pthread_mutex_unlock(&patient_mutex);
+            fprintf(fp_pat, "%d\n", pid);
             sleep(1);
         } else {
             printf("Przychodnia pełna, pacjent czeka...\n");
@@ -166,25 +237,31 @@ int main(void) {
     }
     fclose(fp_pat);
 
-    /* Powiadomienie procesów o zamknięciu */
+    /* Wysyłamy sygnały SIGTERM do procesów rejestracji, lekarzy oraz pacjentów */
     kill(reg_pid, SIGTERM);
     for (int i = 0; i < NUM_DOCTORS; i++) {
         kill(doctor_pids[i], SIGTERM);
     }
+    pthread_mutex_lock(&patient_mutex);
     for (int i = 0; i < patient_count; i++) {
-        kill(patient_pids[i], SIGTERM);
+        if (patient_pids[i] != -1) {
+            kill(patient_pids[i], SIGTERM);
+        }
     }
+    pthread_mutex_unlock(&patient_mutex);
 
-    /* Oczekiwanie na zakończenie procesów */
-    int status;
-    waitpid(reg_pid, &status, 0);
+    /* Oczekujemy zakończenia procesów rejestracji i lekarzy */
+    waitpid(reg_pid, NULL, 0);
     for (int i = 0; i < NUM_DOCTORS; i++) {
         waitpid(doctor_pids[i], NULL, 0);
     }
-    for (int i = 0; i < patient_count; i++) {
-        waitpid(patient_pids[i], NULL, 0);
+
+    /* Dołączamy wątek zbierający procesy pacjentów */
+    if (pthread_join(patient_waiter_tid, NULL) != 0) {
+        perror("Błąd przy dołączaniu wątku zbierającego pacjentów");
     }
 
+    /* Czyszczenie zasobów IPC */
     sem_close(clinic_sem);
     sem_unlink(SEM_NAME);
     msgctl(msg_queue, IPC_RMID, NULL);
