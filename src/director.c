@@ -1,4 +1,9 @@
 #include "clinic.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <string.h>
+#include <unistd.h>
 
 void sendSignalToPID(const char *filename, int sig) {
     FILE *fp = fopen(filename, "r");
@@ -12,6 +17,8 @@ void sendSignalToPID(const char *filename, int sig) {
             perror("Błąd przy wysyłaniu sygnału");
         else
             printf("Dyrektor: Wysłano sygnał %d do PID %d\n", sig, pid);
+    } else {
+        fprintf(stderr, "Nie udało się odczytać PID z pliku %s\n", filename);
     }
     fclose(fp);
 }
@@ -31,7 +38,15 @@ int main(int argc, char *argv[]) {
         }
         char *role = argv[2];
         char filename[50];
-        snprintf(filename, sizeof(filename), "%s_pid.txt", role);
+        /* Dla ról "poz1" lub "poz2" budujemy nazwę pliku */
+        if (strcasecmp(role, "poz1") == 0)
+            snprintf(filename, sizeof(filename), "poz1_pid.txt");
+        else if (strcasecmp(role, "poz2") == 0)
+            snprintf(filename, sizeof(filename), "poz2_pid.txt");
+        else if (strcasecmp(role, "POZ") == 0)
+            snprintf(filename, sizeof(filename), "POZ_pid.txt");
+        else
+            snprintf(filename, sizeof(filename), "%s_pid.txt", role);
         printf("Dyrektor: Wysyłam SIGUSR1 do lekarza o roli %s...\n", role);
         sendSignalToPID(filename, SIGUSR1);
     } else {
