@@ -1,5 +1,3 @@
-//registration.c
-
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +16,7 @@ struct message {
     long msg_type;
     int patient_id;
     char msg_text[100];
+    int specialist_type; // Dodane pole do przechowywania typu specjalisty (dla skierowań)
 };
 
 // Struktura węzła kolejki pacjentów
@@ -100,13 +99,64 @@ void* registration_window_func(void* arg) {
             pthread_mutex_unlock(&queue_mutex);
             break;
         }
+        struct message msg;
         int patient_id;
         char msg_text[100];
         if (dequeue(&patient_id, msg_text)) {
             pthread_mutex_unlock(&queue_mutex);
-            printf("Okienko rejestracji %d: Rejestruję pacjenta %d.\n",
-                   window_number, patient_id);
+            printf("Okienko rejestracji %d: Rejestruję pacjenta %d. Wiadomość: %s\n",
+                   window_number, patient_id, msg_text);
             sleep(1);
+
+            int doctor_msg_queue;
+            key_t doctor_key;
+            int msg_type = 0; // Domyślna wartość, na wypadek błędu (choć nie powinna wystąpić)
+
+
+            // Ustalenie msg_type na podstawie skierowania (msg.msg_type = 7) LUB wyboru pacjenta (msg.msg_type = 2-6)
+            if (msg.msg_type == 7) {
+                 msg_type = msg.specialist_type; // Typ specjalisty ze skierowania
+            } else if (msg.msg_type >= 2 && msg.msg_type <= 6) {
+                 msg_type = msg.msg_type; // Typ lekarza wybrany przez pacjenta przy rejestracji
+            } else {
+                //fprintf(stderr, "Nieznany typ komunikatu w rejestracji: %ld\n", msg.msg_type);
+                continue; // Przejdź do następnego pacjenta w kolejce rejestracji
+            }
+
+
+            if (msg_type == 2 || msg_type == 8) { // POZ lub VIP POZ
+                doctor_key = ftok("clinic_poz", 65);
+            } else if (msg_type == 3 || msg_type == 9) { // kardiolog lub VIP kardiolog
+                doctor_key = ftok("clinic_kardiolog", 65);
+            } else if (msg_type == 4 || msg_type == 10) { // okulista lub VIP okulista
+                doctor_key = ftok("clinic_okulista", 65);
+            } else if (msg_type == 5 || msg_type == 11) { // pediatra lub VIP pediatra
+                doctor_key = ftok("clinic_pediatra", 65);
+            } else if (msg_type == 6 || msg_type == 12) { // lekarz medycyny pracy lub VIP medycyny pracy
+                doctor_key = ftok("clinic_medycyny_pracy", 65);
+            } else {
+                fprintf(stderr, "Nieznany typ lekarza: %d\n", msg_type);
+                continue; // Przejdź do następnego pacjenta w kolejce rejestracji
+            }
+
+            doctor_msg_queue = msgget(doctor_key, 0666);
+            if (doctor_msg_queue == -1) {
+                perror("Błąd przy otwieraniu kolejki lekarza");
+                continue; // Przejdź do następnego pacjenta w kolejce rejestracji
+            }
+
+            struct message doctor_msg;
+            doctor_msg.msg_type = msg_type; // Przekazujemy poprawny msg_type (2-6 lub 8-12)
+            doctor_msg.patient_id = patient_id;
+            strcpy(doctor_msg.msg_text, (msg.msg_type == 7) ? "Skierowanie z POZ" : "Pacjent zarejestrowany"); // Rozróżnienie komunikatu w zależności czy skierowanie czy rejestracja
+
+            if (msgsnd(doctor_msg_queue, &doctor_msg, sizeof(doctor_msg) - sizeof(long), 0) < 0) {
+                perror("Błąd przy wysyłaniu komunikatu do lekarza");
+            } else {
+                printf("Okienko rejestracji %d: Pacjent %d skierowany do lekarza (typ: %d).\n", window_number, patient_id, msg_type);
+            }
+
+
         } else {
             pthread_mutex_unlock(&queue_mutex);
         }
@@ -120,10 +170,11 @@ void log_remaining_patients() {
     if (queue_length > 0) {
         FILE *fp = fopen("report.txt", "a");
         if (fp) {
+            fprintf(fp, "RAPORT ZAMKNIĘCIA REJESTRACJI:\n"); // Dodany nagłówek raportu
             PatientNode *current = queue_head;
             while (current) {
-                fprintf(fp, "Raport Rejestracji: Pacjent %d nie został przyjęty.\n",
-                        current->patient_id);
+                fprintf(fp, "Pacjent %d nie został przyjęty (Przychodnia zamknięta - kolejka rejestracji). Wiadomość: %s\n", // Dodana przyczyna
+                        current->patient_id, current->msg_text);
                 current = current->next;
             }
             fclose(fp);
@@ -177,7 +228,7 @@ int main() {
             *w2 = 2;
             if (pthread_create(&window2_thread, NULL, registration_window_func, w2) == 0) {
                 window2_active = 1;
-                printf("Otwieram drugie okienko rejestracji.\n");
+                printf("Monitor: Otwieram drugie okienko rejestracji.\n");
             } else {
                 perror("Błąd przy tworzeniu okienka rejestracji 2");
                 free(w2);
@@ -187,7 +238,7 @@ int main() {
             if (pthread_cancel(window2_thread) == 0) {
                 pthread_join(window2_thread, NULL);
                 window2_active = 0;
-                printf("Zamykam drugie okienko rejestracji.\n");
+                printf("Monitor: Zamykam drugie okienko rejestracji.\n");
             }
         }
         usleep(200000);

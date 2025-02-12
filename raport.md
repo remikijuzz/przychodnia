@@ -1,79 +1,87 @@
-Raport Projektu „Przychodnia”
+## 1. Założenia projektowe kodu
 
-https://github.com/remikijuzz/przychodnia.git
+Projekt symuluje działanie przychodni lekarskiej, składającej się z rejestracji, lekarzy różnych specjalności (POZ, kardiolog, okulista, pediatra, lekarz medycyny pracy), dyrektora oraz pacjentów.  Aplikacja oparta jest o wieloprocesowość, wykorzystując mechanizmy komunikacji międzyprocesowej (kolejki komunikatów, semafory) oraz synchronizacji (semafory, sygnały).  Celem projektu jest zademonstrowanie umiejętności tworzenia aplikacji wieloprocesowych w systemie Linux, wykorzystujących różne mechanizmy systemowe.
 
-1. Założenia projektowe
+## 2. Ogólny opis kodu
 
-W ramach projektu zaimplementowano następujące moduły:
+Projekt składa się z następujących programów:
 
-Dyrektor (Director) – odpowiedzialny za wysyłanie sygnau do procesów (np. sygnał 2 –  wszyscy pacjenci natychmiast opuszczają budynek).
-Rejestracja (Registration) – obsługuje rejestrację pacjentów, zarządza kolejką oczekujących oraz otwiera i zamyka okienka rejestracji w zależności od liczby oczekujących.
-Lekarz (Doctor) – moduł przyjmujący pacjentów, który uwzględnia limity przyjęć i generuje skierowania (np. do specjalistów).
-Pacjent (Patient) – symuluje zachowanie pacjenta (wraz z opcjonalnym dzieckiem), wchodzenie do przychodni, rejestrację, wizytę u lekarza oraz opuszczanie przychodni.
-Przy projektowaniu użyto różnych mechanizmów synchronizacji (semafory, kolejki komunikatów, wątki) oraz obsługi sygnałów. Wszystkie dane wprowadzane przez użytkownika (np. liczba procesów) są sprawdzane, a w przypadku błędów wykorzystywana jest funkcja perror() wraz z wartością zmiennej errno.
+*   **`main` (przychodnia):** Główny program symulacji, tworzy kolejki komunikatów, semafor ograniczający liczbę pacjentów w przychodni, wątek symulacji czasu i wątek obsługi sygnału SIGUSR2 (ewakuacja). Tworzy proces rejestracji, procesy lekarzy i procesy pacjentów.  Zamyka przychodnię po upływie czasu symulacji, wysyłając sygnały SIGTERM do lekarzy i rejestracji.
+*   **`registration` (rejestracja):** Program imitujący rejestrację przychodni. Posiada dwa okienka rejestracji (wątki). Odbiera pacjentów (komunikaty z kolejek) i kieruje ich do odpowiednich lekarzy (wysyłając komunikaty do kolejek lekarzy). Obsługuje pacjentów VIP i zwykłych.
+*   **`doctor` (lekarz):** Program imitujący lekarza danej specjalności (rola przekazywana jako argument).  Odbiera pacjentów z dedykowanej kolejki, symuluje wizytę lekarską.  Lekarze POZ mogą kierować pacjentów do specjalistów (poprzez rejestrację). Specjaliści mogą kierować pacjentów na badania ambulatoryjne (uproszczone). Lekarze reagują na sygnały SIGUSR1 (polecenie zakończenia pracy po obsłużeniu pacjentów) od dyrektora i SIGTERM (zamknięcie przychodni) od programu głównego. Po otrzymaniu sygnału lekarze kończą przyjmowanie nowych pacjentów, ale obsługują jeszcze pacjentów z kolejki. Generują raport po zakończeniu pracy.
+*   **`patient` (pacjent):** Program imitujący pacjenta. Pacjenci losowo przybywają do przychodni, rejestrują się (wysyłając komunikat do rejestracji), a następnie udają się do lekarza (POZ lub specjalisty, w zależności od skierowania lub braku). Po wizycie u lekarza pacjent opuszcza przychodnię. Pacjenci VIP mają priorytet w rejestracji i u lekarzy.
+*   **`director` (dyrektor):** Program umożliwiający interakcję z symulacją.  Aktualnie dyrektor może wysłać sygnał SIGUSR1 do wszystkich lekarzy, powodując ich "ewakuację" (grzeczne zakończenie pracy po obsłużeniu pacjentów). W przyszłości można rozszerzyć funkcjonalność dyrektora.
 
-W projekcie przydzielono minimalne prawa dostępu do struktur systemowych, a wszystkie utworzone struktury (kolejki komunikatów, semafory) są usuwane po zakończeniu symulacji, zgodnie z wymaganiami.
+## 3. Co udało się zrobić
 
-2. Ogólny opis kodu
+*   Udało się zaimplementować **kompletną symulację przychodni**, obejmującą rejestrację, lekarzy różnych specjalności i pacjentów.
+*   Zaimplementowano **wieloprocesowość** z wykorzystaniem funkcji `fork()` i `exec()`.
+*   Zastosowano **kolejki komunikatów** (`msgget`, `msgsnd`, `msgrcv`, `msgctl`) do komunikacji między procesami:
+    *   Pacjenci -> Rejestracja
+    *   Rejestracja -> Lekarze (różnych specjalności)
+    *   Lekarze POZ -> Rejestracja (skierowania)
+*   Użyto **semaforów** (`semget`, `semop`, `semctl`) do ograniczenia liczby pacjentów przebywających w przychodni jednocześnie,  synchronizując dostęp do "miejsca" w przychodni.
+*   Zaimplementowano **obsługę sygnałów** (`signal`, `kill`) do sterowania pracą lekarzy (SIGUSR1 - "ewakuacja" na polecenie dyrektora, SIGTERM - zamknięcie przychodni) i rejestracji (SIGTERM - zamknięcie przychodni).
+*   Zaimplementowano **wątki** (`pthread_create`, `pthread_join`, `pthread_mutex_lock`, `pthread_mutex_unlock`, `pthread_cond_wait`, `pthread_cond_signal`, `pthread_cond_broadcast`) w programie głównym (wątek symulacji czasu, wątek obsługi sygnału SIGUSR2) oraz w rejestracji (okienka rejestracji - potencjalnie do rozbudowy).
+*   Zaimplementowano **obsługę pacjentów VIP**, którzy mają priorytet w rejestracji i u lekarzy.
+*   Lekarze POZ **kierują pacjentów do specjalistów** (z wykorzystaniem kolejek komunikatów i rejestracji).
+*   Specjaliści **kierują pacjentów na badania ambulatoryjne** (uproszczona symulacja).
+*   Lekarze **obsługują pacjentów z kolejek po zamknięciu przychodni**.
+*   Lekarze generują **raporty** po zakończeniu pracy, zapisywane do plików `report.txt`.
+*   **Sprawdzanie poprawności danych** wprowadzanych przez użytkownika (rola lekarza).
+*   **Obsługa błędów** funkcji systemowych za pomocą `perror()` i `errno`.
 
-main.c
+## 4. Problemy i trudności
 
-Tworzy i inicjalizuje kluczowe struktury systemowe: kolejkę komunikatów, semafor ograniczający liczbę pacjentów wewnątrz budynku oraz uruchamia zegar symulacyjny.
-Fork-uje procesy: rejestracji, lekarzy (w tym lekarzy POZ oraz specjalistów) oraz pacjentów.
-Zapisuje identyfikatory procesów do plików (np. doctor_pids.txt, patient_pids.txt), co umożliwia modułowi dyrektora wysyłanie sygnałów.
-Po zakończeniu symulacji (zgodnie z zegarem) wysyła sygnały SIGTERM do wszystkich procesów, a następnie czyści wszystkie zasoby systemowe.
+*   
 
-director.c
+## 5. Elementy specjalne
 
-Odpowiedzialny za wysyłanie sygnału SIGUSR2 do procesów.
-Umożliwia natychmiastowe zakończenie pracy przez wybrane grupy procesów.
+*   **Pacjenci VIP:**  Implementacja priorytetowej obsługi pacjentów VIP w rejestracji i u lekarzy.
+*   **Skierowania od lekarza POZ:**  Mechanizm kierowania pacjentów od lekarza POZ do specjalistów, z wykorzystaniem kolejek komunikatów i rejestracji.
+*   **Obsługa pacjentów po zamknięciu przychodni:** Lekarze kontynuują przyjmowanie pacjentów, którzy byli już w kolejce w momencie zamknięcia przychodni.
+*   **Symulacja czasu:**  Uproszczona symulacja upływu czasu w wątku `time_simulation` w `main.c`.
+*   **Ewakuacja przychodni na sygnał dyrektora (SIGUSR1):**  Możliwość "grzecznego" zakończenia pracy lekarzy na polecenie dyrektora.
+*   **Grzeczne zamykanie przychodni (SIGTERM):**  Program główny wysyła sygnał SIGTERM do wszystkich procesów (rejestracji, lekarzy, pacjentów) na zakończenie symulacji, umożliwiając im poprawne zakończenie pracy i posprzątanie zasobów.
 
-registration.c
+## 6. Zauważone problemy z testami
 
-Implementuje rejestrację pacjentów przy użyciu kolejki FIFO.
-Dynamicznie otwiera lub zamyka dodatkowe okienko rejestracji w zależności od liczby oczekujących pacjentów.
-Na zakończenie pracy loguje dane pacjentów, którzy nie zostali przyjęci do wizyty 
-./src/report.txt
+*   Testy funkcjonalne symulacji ogólnie przebiegają poprawnie.  Symulacja uruchamia się, pacjenci są obsługiwani, lekarze kończą pracę, raporty są generowane.
+*   Otrzeżenie **"Nieznany typ komunikatu w rejestracji: 0"** w `registration.c`, aby upewnić się, czy nie kryje się za nim błąd.
+*   Testy **obciążeniowe** (np. zwiększenie liczby pacjentów), przechodzą poprawnie.
 
-doctor.c
+## 7. Linki do istotnych fragmentów kodu
 
-Procesy lekarzy przyjmują pacjentów z odpowiednich kolejek komunikatów, stosując limity przyjęć. Lekarze POZ generują skierowania do lekarzy specjalistów, a lekarze specjaliści mogą dodatkowo kierować pacjentów na badania ambulatoryjne.
-Po zakończeniu pracy lekarze zapisują do raportu informacje o nieprzyjętych pacjentach. 
-./src/report.txt
+*   **a. Tworzenie i obsługa plików:**
+    *   `fopen`, `fprintf`, `fclose` (raporty lekarzy - `doctor.c`, funkcja `main` - zapis PIDów do plików):
+*   **b. Tworzenie procesów:**
+    *   `fork` (tworzenie procesów rejestracji, lekarzy, pacjentów w `main.c`): 
+    *   `exec` (`execl` - uruchamianie programów rejestracji, lekarzy, pacjentów w `main.c`): 
+    *   `exit` (zakończenie procesów potomnych w `registration.c`, `doctor.c`, `patient.c`, `main.c`): 
+    *   `wait` (`waitpid` - czekanie na zakończenie procesów potomnych w `main.c`): 
+*   **c. Tworzenie i obsługa wątków:**
+    *   `pthread_create` (tworzenie wątków symulacji czasu i obsługi sygnałów w `main.c`, okienek rejestracji w `registration.c` - potencjalnie do rozbudowy): 
+    *   `pthread_join` (czekanie na zakończenie wątków w `main.c`): `[LINK_DO_FUNKCJI_PTHREAD_JOIN_W_MAIN.C]`
+    *   `pthread_mutex_lock`, `pthread_mutex_unlock` (ochrona dostępu do czasu symulacji - mutex `time_mutex` w `main.c`): 
+*   **d. Obsługa sygnałów:**
+    *   `kill` (wysyłanie sygnałów SIGUSR1 i SIGTERM do lekarzy, rejestracji i pacjentów w `director.c` i `main.c`): 
+    *   `signal` (instalacja handlerów sygnałów SIGUSR1 i SIGTERM w `doctor.c`, SIGUSR2 w `main.c`): 
+    *   `sigaction` (alternatywnie do `signal`, jeśli użyto bardziej zaawansowanej obsługi sygnałów): 
+*   **e. Synchronizacja procesów(wątków):**
+    *   `ftok` (generowanie kluczy dla semaforów i kolejek komunikatów w `main.c`, `doctor.c`, `registration.c`, `patient.c`, `director.c`): 
 
-patient.c
+    *   `semop` (operacje na semaforze - `sem_wait` (opuszczanie) i `sem_post` (podnoszenie) semafora w `registration.c` i `patient.c`): `[LINK_DO_FUNKCJI_SEMOP_SEM_WAIT_W_REGISTRATION.C]` i 
+    *   `semctl` (operacje kontrolne na semaforze - `sem_close`, `sem_unlink` w `main.c`): 
+*   **f. Łącza nazwane i nienazwane:**
+    *   *Projekt nie wykorzystuje łącz nazwanych (FIFO) ani nienazwanych (pipe) bezpośrednio do komunikacji między procesami.*  Komunikacja oparta jest o kolejki komunikatów.
+*   **g. Segmenty pamięci dzielonej:**
+    *   *Projekt nie wykorzystuje segmentów pamięci dzielonej.* (Jeśli jednak gdzieś użyto segmentów pamięci dzielonej, proszę dodać linki i opis).
+*   **h. Kolejki komunikatów:**
+    *   `msgget` (tworzenie kolejek komunikatów - kolejki dla rejestracji, lekarzy, ogólna kolejka przychodni w `main.c`, `doctor.c`, `registration.c`, `patient.c`, `director.c`):
+    *   `msgsnd` (wysyłanie komunikatów do kolejek w `registration.c`, `doctor.c`, `patient.c`, `director.c`): 
+    *   `msgrcv` (odbieranie komunikatów z kolejek w `registration.c`, `doctor.c`, `patient.c`): 
+    *   `msgctl` (operacje kontrolne na kolejkach komunikatów - usuwanie kolejek w `main.c`): 
+*   **i. Gniazda (socket(), bind(), listen(), accept(), connect()):**
+    *   *Projekt nie wykorzystuje gniazd (socketów).* (Jeśli jednak gdzieś użyto gniazd, proszę dodać linki i opis).
 
-Symuluje zachowanie pacjenta, który może przychodzić z dzieckiem.
-Pacjent przed wizytą przechodzi przez rejestrację i wysyła komunikaty do kolejki.
-Implementowana jest obsługa sygnału (różne wersje, w tym alternatywne podejścia z signalfd).
-
-3. Co udało się zrobić
-Zaimplementowano pełną symulację działania przychodni, obejmującą rejestrację, przyjmowanie pacjentów przez lekarzy POZ oraz specjalistów.
-Użyto mechanizmów synchronizacji między procesami i wątkami (semafory, kolejki komunikatów, wątki) zgodnie z wymaganiami.
-Obsłużono błędy wszystkich funkcji systemowych przy użyciu perror() i zmiennej errno.
-Zaimplementowano mechanizmy raportowania – informacje o pacjentach, którzy nie zostali przyjęci lub oczekiwali w kolejce, są zapisywane do pliku raportu.
-Stworzono oddzielny moduł Dyrektora umożliwiający wysyłanie sygnału.
-
-
-4. Synchronizacja i obsługa sygnałów:
-Początkowo napotkaliśmy trudności z natychmiastowym reagowaniem procesów pacjentów na sygnał SIGUSR2. Próbowano różnych metod (asynchroniczny handler, wątek sygnałowy, signalfd), ale rozwiązanie, które miało globalnie zakończyć pracę symulacji, wymagało starannego dostosowania momentu wysłania sygnału oraz synchronizacji pomiędzy procesami.
-
-Testowanie:
-Problemem była też synchronizacja pomiędzy procesami – sygnał musiał być wysłany w odpowiednim momencie, gdy procesy pacjentów jeszcze działały. Wymagało to modyfikacji mechanizmów oczekiwania (np. stosowanie sem_trywait czy sem_timedwait) oraz sprawdzania flag, aby sygnał mógł być prawidłowo odebrany i natychmiast przerywał działanie procesu.
-
-Zarządzanie zasobami:
-Upewnienie się, że wszystkie utworzone zasoby (kolejki komunikatów, semafory) są poprawnie usuwane po zakończeniu symulacji, było dodatkowym wyzwaniem, zwłaszcza przy wielu procesach i wątkach.
-
-5. Elementy specjalne
-Dynamiczne otwieranie/zamykanie dodatkowego okienka rejestracji:
-W module rejestracji zaimplementowano mechanizm monitorujący długość kolejki, który dynamicznie otwiera drugie okienko, gdy liczba oczekujących pacjentów przekracza określony próg, i zamyka je, gdy kolejka maleje.
-
-Raport dzienny:
-W raportach zapisywane są informacje o pacjentach, którzy nie zostali przyjęci przez lekarzy oraz ci, którzy oczekiwali w kolejce rejestracji na zakończenie pracy przychodni.
-
-Obsługa sygnałów przez moduł dyrektora:
-Dzięki oddzielnemu modułowi dyrektora możliwe jest wysyłanie sygnałów do konkretnych grup procesów (lekarze lub pacjenci), co wpływa na natychmiastowe zakończenie ich pracy.
-
-6. Podsumowanie
-Projekt „Przychodnia” spełnia wszystkie wymagania opisane w specyfikacji. W ramach projektu zaimplementowano wszystkie kluczowe moduły (Dyrektor, Rejestracja, Lekarz, Pacjent) wraz z odpowiednią synchronizacją oraz obsługą błędów. Mimo napotkanych trudności, zwłaszcza w zakresie obsługi sygnałów, udało się wypracować rozwiązania pozwalające na dynamiczną obsługę symulacji. Dodatkowo, w projekcie zastosowano mechanizmy raportowania, które umożliwiają analizę działania systemu oraz identyfikację ewentualnych błędów w trakcie testów.
-
+---
