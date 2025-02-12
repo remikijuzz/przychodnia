@@ -29,13 +29,15 @@ char *role_global; // Dodana zmienna globalna do przechowywania roli lekarza
 void sigusr1_handler(int signum) { // Obsługa sygnału 1 (zmiana handlera)
     finish_flag = 1;
     finish_flag_reason = SIGNAL_1; // Ustaw przyczynę na SIGNAL_1
-    printf("Lekarz %s (PID: %d): Otrzymałem SIGUSR1 - kończę pracę po obsłużeniu pacjenta.\n", role_global, getpid(), getpid()); // Użyj role_global
+    printf("Lekarz %s (PID: %d): Otrzymałem SIGUSR1 - kończę pracę po obsłużeniu pacjenta.\n", role_global, getpid()); // Użyj role_global
+    fflush(stdout); // Dodane fflush
 }
 
 void sigterm_handler(int signum) { // NOWY handler dla SIGTERM - zamknięcie przychodni
     finish_flag = 1;
     finish_flag_reason = CLINIC_TERMINATED; // Ustaw przyczynę na CLINIC_TERMINATED
     printf("Lekarz %s (PID: %d): Otrzymałem SIGTERM - przychodnia zamknięta, kończę pracę po obsłużeniu pacjenta.\n", role_global, getpid()); // Użyj role_global
+    fflush(stdout); // Dodane fflush
 }
 
 
@@ -98,8 +100,25 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    signal(SIGUSR1, sigusr1_handler); // Instalacja handlera SIGUSR1
-    signal(SIGTERM, sigterm_handler); // Instalacja handlera SIGTERM
+    // Zapis PID-u lekarza do pliku, przed instalacją handlerów sygnałów
+    char pid_filename[50];
+    snprintf(pid_filename, sizeof(pid_filename), "%s_pid.txt", role);
+    FILE *pid_fp = fopen(pid_filename, "w");
+    if (pid_fp == NULL) {
+        perror("Błąd przy otwieraniu pliku PID");
+        exit(EXIT_FAILURE);
+    }
+    fprintf(pid_fp, "%d\n", getpid());
+    fclose(pid_fp);
+
+    if (signal(SIGUSR1, sigusr1_handler) == SIG_ERR) {
+        perror("Błąd instalacji handlera SIGUSR1");
+        exit(EXIT_FAILURE);
+    }
+    if (signal(SIGTERM, sigterm_handler) == SIG_ERR) {
+        perror("Błąd instalacji handlera SIGTERM");
+        exit(EXIT_FAILURE);
+    }
 
 
     srand(time(NULL) ^ getpid());
