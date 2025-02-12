@@ -1,7 +1,6 @@
 #ifndef PATIENT_H
 #define PATIENT_H
 
-#include <stdbool.h>
 
 // Struktura pacjenta
 typedef struct {

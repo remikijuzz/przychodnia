@@ -104,8 +104,8 @@ void* registration_window_func(void* arg) {
         char msg_text[100];
         if (dequeue(&patient_id, msg_text)) {
             pthread_mutex_unlock(&queue_mutex);
-            printf("Okienko rejestracji %d: Rejestruję pacjenta %d. Wiadomość: %s\n",
-                   window_number, patient_id, msg_text);
+            printf("Okienko rejestracji %d: Rejestruję pacjenta %d.\n",
+                   window_number, patient_id);
             sleep(1);
         } else {
             pthread_mutex_unlock(&queue_mutex);
@@ -122,8 +122,8 @@ void log_remaining_patients() {
         if (fp) {
             PatientNode *current = queue_head;
             while (current) {
-                fprintf(fp, "Raport Rejestracji: Pacjent %d nie został przyjęty. Wiadomość: %s\n",
-                        current->patient_id, current->msg_text);
+                fprintf(fp, "Raport Rejestracji: Pacjent %d nie został przyjęty.\n",
+                        current->patient_id);
                 current = current->next;
             }
             fclose(fp);
@@ -177,7 +177,7 @@ int main() {
             *w2 = 2;
             if (pthread_create(&window2_thread, NULL, registration_window_func, w2) == 0) {
                 window2_active = 1;
-                printf("Monitor: Otwieram drugie okienko rejestracji.\n");
+                printf("Otwieram drugie okienko rejestracji.\n");
             } else {
                 perror("Błąd przy tworzeniu okienka rejestracji 2");
                 free(w2);
@@ -187,7 +187,7 @@ int main() {
             if (pthread_cancel(window2_thread) == 0) {
                 pthread_join(window2_thread, NULL);
                 window2_active = 0;
-                printf("Monitor: Zamykam drugie okienko rejestracji.\n");
+                printf("Zamykam drugie okienko rejestracji.\n");
             }
         }
         usleep(200000);
