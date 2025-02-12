@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
     }
     
     char *role = argv[1];
-    int capacity = 0;
+   int capacity = 0;
     int served = 0;
     if (strcmp(role, "POZ") == 0) {
         capacity = 30;
@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Nieznana rola: %s\n", role);
         exit(1);
     }
-    
+
     int msg_type = 0;
     if (strcmp(role, "POZ") == 0) {
         msg_type = 2;
@@ -64,14 +64,6 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
-    struct sigaction sa;
-    sa.sa_handler = sigusr1_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
-        perror("Błąd przy instalowaniu handlera SIGUSR1");
-        exit(1);
-    }
     
     srand(time(NULL) ^ getpid());
     struct message msg;

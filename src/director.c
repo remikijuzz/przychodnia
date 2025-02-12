@@ -31,7 +31,6 @@ int main(int argc, char *argv[]) {
     }
     
     if (strcmp(argv[1], "-s2") == 0) {
-        // Dla -s2 wysyłamy sygnał tylko do głównego procesu (main)
         printf("Dyrektor: Wysyłam SIGUSR2 do głównego procesu (main)...\n");
         sendSignalToPID("main_pid.txt", SIGUSR2);
     } else {

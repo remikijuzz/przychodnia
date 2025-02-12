@@ -10,12 +10,14 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include <time.h>
 
+// Definicje parametrów symulacji
 #define NUM_DOCTORS 6
 #define NUM_PATIENTS 200
 #define OPENING_TIME 8   // Godzina otwarcia
 #define CLOSING_TIME 16  // Godzina zamknięcia
-#define MAX_PATIENTS_INSIDE 10
+#define MAX_PATIENTS_INSIDE 30
 #define SEM_NAME "/clinic_sem"
 
 // Globalne zmienne
@@ -149,19 +151,27 @@ int main() {
         exit(1);
     }
     while (current_time < CLOSING_TIME && patient_count < NUM_PATIENTS) {
-        patient_pids[patient_count] = fork();
-        if (patient_pids[patient_count] == 0) {
-            execl("./patient", "patient", NULL);
-            perror("Błąd uruchamiania pacjenta");
-            exit(1);
+        int sem_val;
+        sem_getvalue(clinic_sem, &sem_val);
+        if (sem_val > 0) {
+            // Mamy wolne miejsce – tworzymy nowego pacjenta.
+            patient_pids[patient_count] = fork();
+            if (patient_pids[patient_count] == 0) {
+                execl("./patient", "patient", NULL);
+                perror("Błąd uruchamiania pacjenta");
+                exit(1);
+            }
+            fprintf(fp_pat, "%d\n", patient_pids[patient_count]);
+            patient_count++;
+            usleep(10000);
+        } else {
+            // Przychodnia pełna – czekamy na zwolnienie miejsca.
+            printf("Przychodnia pełna, pacjent czeka na zewnątrz...\n");
+            usleep(100000);  
         }
-        fprintf(fp_pat, "%d\n", patient_pids[patient_count]);
-        patient_count++;
-        sleep(1);
     }
     fclose(fp_pat);
     
-        
     // Wysyłamy SIGTERM do procesów: rejestracji, lekarzy oraz (jeśli jeszcze działają) pacjentów.
     kill(reg_pid, SIGTERM);
     for (int i = 0; i < NUM_DOCTORS; i++) {
@@ -177,7 +187,6 @@ int main() {
     int status;
     pid_t result = waitpid(reg_pid, &status, WNOHANG);
     if (result == 0) {
-        // Proces rejestracji jeszcze działa – czekamy chwilę i wymuszamy zabicie
         sleep(2);
         kill(reg_pid, SIGKILL);
         waitpid(reg_pid, &status, 0);
